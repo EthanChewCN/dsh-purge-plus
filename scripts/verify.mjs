@@ -149,9 +149,18 @@ console.log("[7] 在线更新通道");
     m[1] === slug ? ok(`${label} = ${m[1]}`) : bad(`${label} = ${m[1]}（应为 ${slug}）`);
   }
   // 更新路径上不允许残留旧仓库坐标，否则升级会去拉 community 的包。
-  const leftovers = ["lib/community.js", "lib/update-net.js", "lib/update.js", "lib/update-targets.js"]
-    .filter((f) => read(f).includes("kingcharleslzy-ai/dsh-purge"));
-  leftovers.length === 0 ? ok("更新路径无旧仓库残留") : bad(`旧仓库坐标残留: ${leftovers.join(", ")}`);
+  // 旧坐标不能写字面量：vendor 副本里的仓库名可能是混淆过的，硬编码会永远
+  // 匹配不到（这条检查曾经就是空转的）。改为从 vendor 原文里提取。
+  const upstreamSrc = fs.readFileSync(path.join(ROOT, "vendor/community/lib/community.js"), "utf8");
+  const upstreamSlug = (upstreamSrc.match(/export const REPOSITORY = "([^"]+)"/) || [])[1] || "";
+  if (!upstreamSlug) bad("无法从 vendor 提取上游仓库坐标");
+  else {
+    const leftovers = ["lib/community.js", "lib/update-net.js", "lib/update.js", "lib/update-targets.js"]
+      .filter((f) => read(f).includes(upstreamSlug));
+    leftovers.length === 0
+      ? ok(`更新路径无上游坐标残留（已核对 ${upstreamSlug.length} 字符坐标）`)
+      : bad(`旧仓库坐标残留: ${leftovers.join(", ")}`);
+  }
 
   // 资产名必须与 build 产出的 tgz 前缀一致，否则 releases 里永远匹配不到。
   const pkgJson = JSON.parse(read("package.json"));
@@ -171,6 +180,24 @@ console.log("[7] 在线更新通道");
     re.test("v1.7.20") ? ok("发行 tag 白名单仍接受 vX.Y.Z") : bad("vX.Y.Z 被拒");
     !re.test("v1.7.20-rc.1") ? ok("发行 tag 白名单拒绝预发布") : bad("预发布未被拒");
   }
+
+  // 同一道闸门在 community.js 里还有两处**内联**正则：列表过滤 + 安装前校验。
+  // 只放宽 update.js 那一处时，列表能过、点安装却抛「只安装正式发布版本」。
+  const comm = read("lib/community.js");
+  const marker = "(?:-plus\\.\\d+)?";
+  const inlineN = comm.split(marker).length - 1;
+  inlineN === 2
+    ? ok("community.js 两处内联 tag 正则已放宽")
+    : bad(`community.js 内联正则放宽数量 = ${inlineN}（应为 2）`);
+
+  // 历史条目要按当前 releases 过滤：状态目录沿用 community，历史里混着它的
+  // 下载记录，不过滤就会列出装不动的条目。
+  upd.includes("forkRefs")
+    ? ok("历史条目按当前 releases 过滤")
+    : bad("历史条目未过滤（会列出装不动的旧版本）");
+  !comm.includes("dsh-purge Community")
+    ? ok("发行 label 无社区版残留")
+    : bad("label 仍含 dsh-purge Community");
   // 版本比较：plus.N 递增要判成更新，上游大版本要压过任何 plus 小版本。
   const vs = await import(path.join(PKG, "lib", "update-state.js"));
   const okNewer = vs.versionIsNewer("1.7.20-plus.2", "1.7.20-plus.1")

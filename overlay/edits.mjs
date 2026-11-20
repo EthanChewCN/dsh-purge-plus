@@ -201,12 +201,79 @@ export function buildEdits(repo = resolveRepo()) {
       replace:
         "const FORK_RELEASE_RE = /^v\\d+\\.\\d+\\.\\d+(?:-plus\\.\\d+)?$/; // [dsh-purge-plus] 认 -plus.N 后缀",
     },
+    // 同一道闸门在 community.js 里还有两处**内联**正则：一处过滤发行列表，
+    // 一处是安装前的 ref 校验。只放宽 update.js 的 FORK_RELEASE_RE 是不够的——
+    // 列表能过，但点「安装」会抛「只安装正式发布版本」。
+    {
+      file: "lib/community.js",
+      required: true,
+      find: "      (r) => !r.draft && !r.prerelease && /^v\\d+\\.\\d+\\.\\d+$/.test(r.tag_name),",
+      replace:
+        "      (r) => !r.draft && !r.prerelease && /^v\\d+\\.\\d+\\.\\d+(?:-plus\\.\\d+)?$/.test(r.tag_name), // [dsh-purge-plus] 认 -plus.N 后缀",
+    },
+    {
+      file: "lib/community.js",
+      required: true,
+      find: 'if (!/^v\\d+\\.\\d+\\.\\d+$/.test(release.ref)) throw Error("只安装正式发布版本");',
+      replace:
+        'if (!/^v\\d+\\.\\d+\\.\\d+(?:-plus\\.\\d+)?$/.test(release.ref)) throw Error("只安装正式发布版本"); // [dsh-purge-plus]',
+    },
     {
       file: "lib/update.js",
       required: false,
       count: 2,
       find: "label: `Purge Community ${version}`,",
       replace: "label: `dsh-purge-plus ${version}`,"
+    },
+    // UPSTREAM_REPO 现在指向本仓库，于是 listGithubTags()/upstreamHeadItem()
+    // 会把自己的 tag 和 master 列成「上游 · 已停止维护」——语义反了。
+    // 这两条通道对我们只剩「看提交号」的用处，文案要如实说。
+    {
+      file: "lib/update.js",
+      required: true,
+      regex: true,
+      // 用正则而不是字面量：这段文案里含上游仓库坐标，而上游坐标可能在
+      // vendor 副本里被改名（本仓库基座就是一次 fork），字面量锚点会静默失配。
+      find: 'export const UPSTREAM_WARNING =\\s*\\n\\s*"[^"]*?已停止维护[^"]*"\\s*\\+\\s*\\n\\s*"[^"]*";',
+      replace:
+        'export const UPSTREAM_WARNING = // [dsh-purge-plus] 本仓库自持发布，tag/head 通道只用于对照提交号\n' +
+        '  "这是本仓库的 tag / head 通道，只用于对照提交号，不是发行包来源。" +\n' +
+        '  "在线升级请走 releases（stable）通道，它会校验 SHA256SUMS.txt。";',
+    },
+    {
+      file: "lib/update.js",
+      required: true,
+      find: "label: `${versionLabel(name, channel, sha)} · 上游`,",
+      replace: "label: `${versionLabel(name, channel, sha)} · 本仓库 tag（仅对照）`, // [dsh-purge-plus]",
+    },
+    {
+      file: "lib/update.js",
+      required: true,
+      find: "label: `${versionLabel(version, channel, sha)} · 上游 ${ref}（已停止维护）`,",
+      replace: "label: `${versionLabel(version, channel, sha)} · 本仓库 ${ref}`, // [dsh-purge-plus]",
+    },
+    // 基座沿用 community 的状态目录，本机的 version-history.json 里存着社区版的
+    // 下载记录（v1.6.67 … v1.7.20）。这些 ref 在本仓库没有对应发行包，列出来
+    // 就是一堆点不动的条目——只有当前 releases 里真实存在的才保留。
+    {
+      file: "lib/update.js",
+      required: true,
+      find:
+        '  for (const item of readHistory()) {\n' +
+        '    if (!item || !item.ref || withdrawnVersion(item)) continue;',
+      replace:
+        '  // [dsh-purge-plus] 历史条目只保留本仓库确实发过的版本，否则面板会列出\n' +
+        '  // 一堆装不动的条目（状态目录沿用 community，历史里混着它的记录）。\n' +
+        '  const forkRefs = new Set(fork.rows.map((row) => row.ref));\n' +
+        '  for (const item of readHistory()) {\n' +
+        '    if (!item || !item.ref || withdrawnVersion(item)) continue;\n' +
+        '    if (!forkRefs.has(item.ref)) continue;',
+    },
+    {
+      file: "lib/community.js",
+      required: true,
+      find: "label: `dsh-purge Community ${version}`,",
+      replace: "label: `dsh-purge-plus ${version}`, // [dsh-purge-plus]",
     },
   ];
 }

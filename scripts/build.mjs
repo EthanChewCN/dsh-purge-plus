@@ -55,7 +55,20 @@ for (const [i, e] of EDITS.entries()) {
   }
   const src = fs.readFileSync(fp, "utf8");
   const want = e.count || 1;
-  const hits = countOccurrences(src, e.find);
+
+  // regex: true 时 e.find 是正则源串。用于锚点本身含有「会被上游改名/混淆」的
+  // 片段（例如仓库坐标）的情况——字面量锚点一旦上游改名就静默失配。
+  let hits;
+  let next;
+  if (e.regex) {
+    const re = new RegExp(e.find, "g");
+    hits = (src.match(re) || []).length;
+    next = () => src.replace(new RegExp(e.find, "g"), () => e.replace);
+  } else {
+    hits = countOccurrences(src, e.find);
+    next = () => (want === 1 ? src.replace(e.find, () => e.replace) : src.split(e.find).join(e.replace));
+  }
+
   if (hits !== want) {
     const msg = `${tag}: 锚点命中 ${hits} 次（要求恰好 ${want} 次）\n    锚点: ${JSON.stringify(e.find.slice(0, 120))}`;
     if (e.required) die(msg);
@@ -63,7 +76,7 @@ for (const [i, e] of EDITS.entries()) {
   }
   // 用函数形式做替换：replace 字符串里可能出现 $ 序列（如正则字面量的 $/），
   // 直接传字符串会被 String.replace 当成替换模式解释。
-  fs.writeFileSync(fp, want === 1 ? src.replace(e.find, () => e.replace) : src.split(e.find).join(e.replace));
+  fs.writeFileSync(fp, next());
   applied++;
   log(`  ✓ ${tag}`);
 }
