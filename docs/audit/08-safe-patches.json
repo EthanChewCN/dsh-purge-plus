@@ -1,0 +1,533 @@
+[
+  {
+    "id": 1,
+    "title": "WORKSPACE_CONTEXT_INTRO",
+    "target": "agent-instructions",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "全局免责声明",
+    "line": 3085
+  },
+  {
+    "id": 4,
+    "title": "SYSTEM_PROMPT_PERSONA",
+    "target": "agent-preset,web-app,headless,preset-acp-app,preset-sdk-app",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "persona：去掉官方默认身份，不另写人设",
+    "line": 3158
+  },
+  {
+    "id": 43,
+    "title": "WEB_PRESET_IDENTITY_STRIP",
+    "target": "preset-standard,preset-ptc,preset-cordis,preset-minimal",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "Web 四个内置预设只去掉身份句",
+    "line": 3174
+  },
+  {
+    "id": 70,
+    "title": "PRESET_SHELL_NETWORK",
+    "target": "preset-minimal,preset-sdk-minimal",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "极简模式终端不再写没有网络",
+    "line": 3201
+  },
+  {
+    "id": 5,
+    "title": "APPROVAL_NEVER_SENTENCE",
+    "target": "user-approval,user-approval-invariant",
+    "anchorType": "literal-patterns",
+    "optional": false,
+    "purpose": "审批提示句限制",
+    "line": 3216
+  },
+  {
+    "id": 6,
+    "title": "SANDBOX_DENY_FILE_WRITE",
+    "target": "sandbox-local",
+    "anchorType": "literal-patterns",
+    "optional": false,
+    "purpose": "沙箱 deny file-write",
+    "line": 3241
+  },
+  {
+    "id": 7,
+    "title": "SANDBOX_MODE_DEFAULT",
+    "target": "base",
+    "anchorType": "literal-patterns",
+    "optional": false,
+    "purpose": "沙箱默认 danger-full-access（可被 UI 切换，不写死 env）",
+    "line": 3251
+  },
+  {
+    "id": 8,
+    "title": "APPROVAL_POLICY_DEFAULT",
+    "target": "base",
+    "anchorType": "literal-patterns",
+    "optional": false,
+    "purpose": "审批：danger-full-access → never（与 mode 组合合法）",
+    "line": 3263
+  },
+  {
+    "id": 9,
+    "title": "APPROVAL_AUTO_GRANT",
+    "target": "user-approval-code,user-approval-invariant,user-approval",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "审批门自动放行",
+    "line": 3282
+  },
+  {
+    "id": 10,
+    "title": "APPROVAL_CONFIG_DEFAULT_NEVER",
+    "target": "user-approval-code",
+    "anchorType": "literal-patterns",
+    "optional": false,
+    "purpose": "审批配置默认 never",
+    "line": 3309
+  },
+  {
+    "id": 11,
+    "title": "APPROVAL_NEVER_SENTENCE_BYPASS",
+    "target": "user-approval-code",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "never 提示句 → 自动放行",
+    "line": 3318
+  },
+  {
+    "id": 12,
+    "title": "APPROVAL_ASK_SENTENCE_BYPASS",
+    "target": "user-approval-code,user-approval",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "ask 提示句 → 自动放行",
+    "line": 3341
+  },
+  {
+    "id": 13,
+    "title": "ESCALATION_WIDENING_EXEMPT",
+    "target": "escalation",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "豁免严格升级阶梯",
+    "line": 3385
+  },
+  {
+    "id": 14,
+    "title": "ESCALATION_GRANT_UNCONDITIONAL",
+    "target": "escalation",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "升级请求无条件授信",
+    "line": 3413
+  },
+  {
+    "id": 15,
+    "title": "SANDBOX_CONFINE_PASSTHROUGH",
+    "target": "sandbox-local",
+    "anchorType": "literal-patterns",
+    "optional": false,
+    "purpose": "沙箱 confine 直通",
+    "line": 3487
+  },
+  {
+    "id": 16,
+    "title": "FS_FENCE_DISABLED",
+    "target": "fs-sandbox",
+    "anchorType": "literal-patterns",
+    "optional": false,
+    "purpose": "文件系统围栏取消",
+    "line": 3565
+  },
+  {
+    "id": 17,
+    "title": "FS_OBSERVATION_INTENT_FREE",
+    "target": "fs-observation-policy",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "观察策略读写意图放行",
+    "line": 3598
+  },
+  {
+    "id": 18,
+    "title": "REPEAT_TOOL_REMINDER_DISABLED",
+    "target": "repeat-tool-reminder",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "重复调用守卫禁用",
+    "line": 3659
+  },
+  {
+    "id": 22,
+    "title": "READ_CAPS_RAISED",
+    "target": "tool-fs",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "read 上限放宽",
+    "line": 3713
+  },
+  {
+    "id": 23,
+    "title": "SUBAGENT_MAXDEPTH_RAISED",
+    "target": "subagent,tool-subagent",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "子代理深度默认 3 → 10",
+    "line": 3734
+  },
+  {
+    "id": 25,
+    "title": "HARNESS_IDENTITY_STRIP",
+    "target": "system-prompt",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "去掉官方默认身份，保留官方功能提示词",
+    "line": 3770
+  },
+  {
+    "id": 26,
+    "title": "MINIMAL_PERSONA_PURGE",
+    "target": "preset-minimal,preset-sdk-minimal",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "内置 minimal：去掉默认身份并打开 complete，让 inject 能进",
+    "line": 3791
+  },
+  {
+    "id": 29,
+    "title": "TOOL_WEB_UNTRUSTED_NEUTRAL",
+    "target": "tool-web,tool-web-nested",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "dsh-tool-web：外部内容 untrusted 拦截→可执行数据",
+    "line": 3849
+  },
+  {
+    "id": 33,
+    "title": "TOOL_SHELL_DENIAL_PROMPT",
+    "target": "tool-bash,tool-pwsh",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "bash/pwsh 工具描述：沙箱拒绝话术→可继续",
+    "line": 3893
+  },
+  {
+    "id": 34,
+    "title": "SANDBOX_HINT_NEUTRAL",
+    "target": "escalation",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "沙箱拒绝/升级 hint 不再要求用户审批",
+    "line": 3968
+  },
+  {
+    "id": 35,
+    "title": "ESCALATION_NEVER_REJECT",
+    "target": "escalation",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "升级结果 rejected/cancelled/unavailable 仍授信",
+    "line": 3993
+  },
+  {
+    "id": 36,
+    "title": "TOOL_FS_ESCALATION_SCHEMA",
+    "target": "tool-fs,escalation",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "fs 升级字段：去掉 user approval 拦截描述",
+    "line": 4052
+  },
+  {
+    "id": 37,
+    "title": "SUBAGENT_SCOPE_LOCK_NEUTRAL",
+    "target": "subagent,subagent-types",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "子代理权限锁→可继续",
+    "line": 4082
+  },
+  {
+    "id": 92,
+    "title": "SUBAGENT_SAME_INJECT_PATH",
+    "target": "subagent,subagent-types",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "子代理创建时立刻挂 assemble 注入，并继承父会话权限",
+    "line": 4106
+  },
+  {
+    "id": 38,
+    "title": "PERSONA_TEXT_PREFIX_ALIAS",
+    "target": "persona",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "dsh-persona：0.2.0 required prefix 改 default，并兼容旧 text",
+    "line": 4159
+  },
+  {
+    "id": 39,
+    "title": "SESSION_V0_PLUGIN_SUMMARY_ALIAS",
+    "target": "session-format-v0",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "v0 会话：mnemon summary 可挂在 instructions/recall 上",
+    "line": 4190
+  },
+  {
+    "id": 40,
+    "title": "COMPLETE_PROMPT_KEEP_INJECT",
+    "target": "system-prompt,system-prompt-nested",
+    "anchorType": "replacements+regex",
+    "optional": false,
+    "purpose": "complete 预设保留注入段并放最前",
+    "line": 4206
+  },
+  {
+    "id": 42,
+    "title": "SETTINGS_LEGACY_API",
+    "target": "settings",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "设置服务补回 register/get，旧插件可继续用",
+    "line": 4220
+  },
+  {
+    "id": 47,
+    "title": "ANTHROPIC_OAUTH_NO_CLAUDE_IDENTITY",
+    "target": "pi-ai-anthropic-messages",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "Anthropic OAuth 不再强插 Claude Code 首段系统提示",
+    "line": 4450
+  },
+  {
+    "id": 48,
+    "title": "TOOL_SHELL_DELETE_MOVE_NEUTRAL",
+    "target": "tool-bash,tool-pwsh",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "bash/pwsh 去掉 delete/move 过度谨慎描述",
+    "line": 4546
+  },
+  {
+    "id": 49,
+    "title": "ANTHROPIC_OAUTH_CLI_NEUTRAL",
+    "target": "pi-ai-anthropic-messages",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "OAuth 不再伪装 claude-cli",
+    "line": 4565
+  },
+  {
+    "id": 51,
+    "title": "FRESH_SESSION_FULL_ACCESS",
+    "target": "permission-presets,permission-presets-types",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "新会话在部署已是 danger-full-access 时不再钉回 workspace-write",
+    "line": 4593
+  },
+  {
+    "id": 52,
+    "title": "SESSION_LOG_CLOUD_UPLOAD_REMOVED",
+    "target": "session-log-deepseek,session-log-deepseek-types",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "Session Log 云端上传整体移除，会话只落本地",
+    "line": 4618
+  },
+  {
+    "id": 55,
+    "title": "SYSTEM_PROMPT_REPLACE_HEAD",
+    "target": "agent-loop",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "每一步用当前整段系统提示替换第一条，避免旧提示被钉住",
+    "line": 4655
+  },
+  {
+    "id": 66,
+    "title": "SYSTEM_PROMPT_RENDER_GUARD",
+    "target": "system-prompt,system-prompt-nested",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "renderPrompt 对 undefined section.text 兜底，避免第二轮 gateway/internal",
+    "line": 4670
+  },
+  {
+    "id": 68,
+    "title": "SYSTEM_NODES_CONTENT_GUARD",
+    "target": "agent-loop,session",
+    "anchorType": "replacements",
+    "optional": false,
+    "purpose": "systemNodes/derive 对缺 content 兜底，避免回退后第二轮 gateway/internal",
+    "line": 4702
+  },
+  {
+    "id": 69,
+    "title": "MODEL_STREAM_RELEASE",
+    "target": "llm-deepseek",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "deepseek-flash 恢复官方 in-history，并撤掉会打成 TRANSPORT 的独立连接补丁",
+    "line": 4742
+  },
+  {
+    "id": 72,
+    "title": "MESSAGES_SYSTEM_CURRENT",
+    "target": "llm-deepseek",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "Messages 的 system 字段用当前系统提示，不再把后出现的系统提示降成中途消息",
+    "line": 4880
+  },
+  {
+    "id": 75,
+    "title": "REWIND_RESET_TODOS",
+    "target": "tool-todo",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "回退把已完成任务收回成未开始",
+    "line": 4908
+  },
+  {
+    "id": 57,
+    "title": "DEEPSEEK_SYSTEM_ROLE",
+    "target": "pi-ai-completions,pi-ai-responses-shared",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "developer role 仅限 openai.com/azure 原生，第三方代理 (deepseek/glm/recoverystar/中转) 全回退 system",
+    "line": 4937
+  },
+  {
+    "id": 58,
+    "title": "REWIND_SKIP_DERIVE",
+    "target": "session",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "回退空标记不进模型请求",
+    "line": 4986
+  },
+  {
+    "id": 59,
+    "title": "OFFICIAL_AUTO_REVIEW_PASSTHROUGH",
+    "target": "auto-review",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "官方 Auto Review 不再拦工具",
+    "line": 5003
+  },
+  {
+    "id": 61,
+    "title": "OFFICIAL_SANDBOX_POLICY_NEUTRAL",
+    "target": "sandbox-policy",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "沙箱只读策略不拦任务；加宽自动放行",
+    "line": 5025
+  },
+  {
+    "id": 63,
+    "title": "OFFICIAL_PLAN_MODE_NEUTRAL",
+    "target": "base,preset-ptc,preset-standard,preset-cordis",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "计划模式：操作者要求实施时不硬拦",
+    "line": 5045
+  },
+  {
+    "id": 78,
+    "title": "OVERLAY_RESTORE_FROM_BAK",
+    "target": "app-boot",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "声明过的补丁文件不见时，从 .dshpurge.bak 拷回再加载",
+    "line": 5076
+  },
+  {
+    "id": 85,
+    "title": "SESSION_PROMPT_STEER_INTERRUPT",
+    "target": "api-session-controller",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "官方三条路：prompt() 的 steer 走插话，其余走 followup",
+    "line": 5117
+  },
+  {
+    "id": 86,
+    "title": "SESSION_QUEUE_STEER_INTERRUPT",
+    "target": "api-session-controller,agent-loop",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "官方三条路：排队 followup/next-turn，插话 steer/next-step",
+    "line": 5145
+  },
+  {
+    "id": 89,
+    "title": "SYSTEM_FIELD_EXTRACT",
+    "target": "agent-loop",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "buildRequest 把 role:system 消息提取到单独 system 字段，避免 0.2.0 把系统提示词当对话历史",
+    "line": 5210
+  },
+  {
+    "id": 90,
+    "title": "OPENAI_NATIVE_SYSTEM_ROLE",
+    "target": "pi-ai-completions",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "openai-completions：挂针进 messages[0].role=system（0.1.7 子会话同路，0.2 原生槽）",
+    "line": 5277
+  },
+  {
+    "id": 91,
+    "title": "ANTHROPIC_NATIVE_PARAMS_SYSTEM",
+    "target": "pi-ai-anthropic-messages",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "anthropic-messages：挂针进 params.system（0.1.7 子会话同路，0.2 原生槽）",
+    "line": 5349
+  },
+  {
+    "id": 93,
+    "title": "PRODUCT_ANALYTICS_DEFAULT_OFF",
+    "target": "product-analytics",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "产品埋点默认关闭，不再向 collector 送行为事件",
+    "line": 5426
+  },
+  {
+    "id": 94,
+    "title": "PRODUCT_TELEMETRY_OTEL_NOOP",
+    "target": "product-telemetry-otel",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "产品遥测 OTLP 导出器装上也不发事件",
+    "line": 5446
+  },
+  {
+    "id": 95,
+    "title": "SESSION_TELEMETRY_OTEL_DISABLED",
+    "target": "session-telemetry-otel",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "会话遥测默认 DISABLED，反馈也不走 OTLP",
+    "line": 5466
+  },
+  {
+    "id": 96,
+    "title": "SKILL_OFFICE_ASSET_FALLBACK",
+    "target": "skill-office",
+    "anchorType": "replacements",
+    "optional": true,
+    "purpose": "office-skills 缺 SKILL.md 时回退包内 assets，桌面 Host 不再 ENOENT 起不来",
+    "line": 5482
+  }
+]

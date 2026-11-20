@@ -1,0 +1,2815 @@
+[
+  {
+    "name": "access_session",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "host",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "username",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "method",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "privilege",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "session_ref",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_by_agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "obtained_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:3005",
+    "reader": [
+      "store-core.js:3019 (listAccess)",
+      "store-core.js:1322 (consoleDigest)"
+    ]
+  },
+  {
+    "name": "agent_report",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "session_id",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "parent_session",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "role",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "label",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "blocked_reason",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "needs",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "summary",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "acknowledged_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:1970",
+    "reader": [
+      "store-core.js:2058 (attentionQueue)",
+      "store-core.js:2035 (latestAgentReports)"
+    ],
+    "retention": "每 session_id 只留最近 20 条（store-core.js:1991 DELETE）；acknowledged_at 一旦写入不再清"
+  },
+  {
+    "name": "asset",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "segment_cidr",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "ip",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "ip_int",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "state",
+        "type": "TEXT",
+        "default": "'unknown'"
+      },
+      {
+        "name": "primary_name",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "default": null
+      },
+      {
+        "name": "first_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "discovered_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "test_status",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "test_notes",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "test_surface",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "test_updated_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "test_updated_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "blocked_count",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "priority",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "potential",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "assess_reason",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "assessed_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "assessed_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "scope",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5982",
+    "reader": [
+      "store-core.js:1504 (listAssets)",
+      "store-core.js:1738 (hostNextActions)",
+      "store-core.js:1854 (assetNextActions)",
+      "store-core.js:1274 (discoveryTimeline)"
+    ],
+    "constraints": [
+      "UNIQUE(segment_cidr, ip)"
+    ],
+    "retention": "discovered_at 首次写入后不再刷新（schema.js:586-588）"
+  },
+  {
+    "name": "asset_coverage",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "surface",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "web",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "auth",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "cve",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "app",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": "'open'"
+      },
+      {
+        "name": "blocked_reason",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:1797",
+    "reader": [
+      "store-core.js:1854 (assetNextActions)"
+    ],
+    "constraints": [
+      "UNIQUE(asset_id)"
+    ]
+  },
+  {
+    "name": "asset_name",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "provenance",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "first_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5982",
+    "reader": [
+      "store-core.js:1469 (assetRow)"
+    ],
+    "constraints": [
+      "UNIQUE(asset_id, name, kind)"
+    ]
+  },
+  {
+    "name": "attack_file",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "target",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "target_kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "path",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "description",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "evidence",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "vuln_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5226",
+    "reader": [
+      "store-core.js:5262 (listAttackFiles)",
+      "store-core.js:5273 (attackFileTree)",
+      "store-core.js:5284 (readAttackFile)"
+    ],
+    "constraints": [
+      "UNIQUE(target, name)"
+    ]
+  },
+  {
+    "name": "attack_step",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "seq",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "stage",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "detail",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "vuln_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "access_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "point_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "evidence_ref",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "result",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "recorded_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "recorded_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "stage_code",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:4959",
+    "reader": [
+      "store-core.js:5017 (listChain)",
+      "store-core.js:1322 (consoleDigest)",
+      "store-core.js:3397 (scoreReport)"
+    ]
+  },
+  {
+    "name": "cleanup_item",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "target",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "location",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "detail",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": "'open'"
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:4906",
+    "reader": [
+      "store-core.js:4917 (listCleanup)"
+    ]
+  },
+  {
+    "name": "credential",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "host",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "username",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "secret_type",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "secret_value",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "secret_ref",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "privilege",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_by_agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "agent",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:2968",
+    "reader": [
+      "store-core.js:2992 (listCredentials)",
+      "store-core.js:1322 (consoleDigest)"
+    ],
+    "constraints": [
+      "UNIQUE(host, username, secret_type)"
+    ]
+  },
+  {
+    "name": "data_proof",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "vuln_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "target",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "interface",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "fields",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "row_count",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "sample",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "query",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "evidence_ref",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "pii_type",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:4873",
+    "reader": [
+      "store-core.js:4888 (listDataProofs)",
+      "tools.js:2503 (redteam_data_proof)"
+    ]
+  },
+  {
+    "name": "edge",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "src_kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "src_id",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "dst_kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "dst_id",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "relation",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "default": null
+      },
+      {
+        "name": "scan_run_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "first_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:6010",
+    "reader": [
+      "store-core.js:2110 (graph)"
+    ],
+    "constraints": [
+      "UNIQUE(src_kind, src_id, dst_kind, dst_id, relation)"
+    ]
+  },
+  {
+    "name": "fingerprint",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "port_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "vendor",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "product",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "version",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "evidence",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "default": null
+      },
+      {
+        "name": "provenance",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "first_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:6085",
+    "reader": [
+      "store-core.js:1469 (assetRow)"
+    ]
+  },
+  {
+    "name": "host_coverage",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "access",
+        "type": "TEXT",
+        "default": "'none'"
+      },
+      {
+        "name": "files",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "credentials",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "privesc",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "web",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "db",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "lateral",
+        "type": "TEXT",
+        "default": "'untested'"
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": "'open'"
+      },
+      {
+        "name": "blocked_reason",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:1629",
+    "reader": [
+      "store-core.js:1738 (hostNextActions)"
+    ],
+    "constraints": [
+      "UNIQUE(asset_id)"
+    ]
+  },
+  {
+    "name": "host_finding",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "detail",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "evidence_ref",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:1697",
+    "reader": [
+      "store-core.js:1659 (getHostCoverage)"
+    ]
+  },
+  {
+    "name": "http_evidence",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "vuln_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "label",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "method",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "url",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "request",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "response",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "captured_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "captured_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:4860",
+    "reader": [
+      "store-core.js:4942 (listHttpEvidence)",
+      "store-core.js:3397 (scoreReport 兜底归因)"
+    ]
+  },
+  {
+    "name": "observation",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "entity_kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "entity_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "attr",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "value",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "provenance",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "scan_run_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "collected_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "raw_ref",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:6002",
+    "reader": [
+      "schema.js:437 (v_asset_summary)",
+      "store-core.js:1296 (stats)"
+    ],
+    "retention": "无上限，随每次 import 追加"
+  },
+  {
+    "name": "port",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "proto",
+        "type": "TEXT",
+        "default": "'tcp'"
+      },
+      {
+        "name": "port",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "state",
+        "type": "TEXT",
+        "default": "'open'"
+      },
+      {
+        "name": "provenance",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "banner",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "url",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "first_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5982",
+    "reader": [
+      "store-core.js:1469 (assetRow)",
+      "store-core.js:2110 (graph)",
+      "store-core.js:1738 (hostNextActions)"
+    ],
+    "constraints": [
+      "UNIQUE(asset_id, proto, port)"
+    ]
+  },
+  {
+    "name": "scan_run",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "agent_session_id",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "argv",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "started_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "finished_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": "'running'"
+      }
+    ],
+    "writer": "store-core.js:6045",
+    "reader": [
+      "store-core.js:3397 (scoreReport)"
+    ],
+    "retention": "无上限"
+  },
+  {
+    "name": "score_hit",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "point_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "vuln_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "step_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "target",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "evidence",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "self_created",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "port",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "recorded_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "recorded_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "points",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "multiplier",
+        "type": "REAL",
+        "default": "1"
+      },
+      {
+        "name": "stage_code",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:2649",
+    "reader": [
+      "store-core.js:2311 (listScorePoints)",
+      "store-core.js:3397 (scoreReport)",
+      "store-core.js:4491 (scoreChain)"
+    ],
+    "retention": "不删；封顶只影响计分不改行"
+  },
+  {
+    "name": "score_point",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "code",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "points",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "max_hits",
+        "type": "INTEGER",
+        "default": "1"
+      },
+      {
+        "name": "description",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "enabled",
+        "type": "INTEGER",
+        "default": "1"
+      },
+      {
+        "name": "sort_order",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "src",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "rule",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "tier",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "cap",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "dedup_scope",
+        "type": "TEXT",
+        "default": "'service'"
+      },
+      {
+        "name": "legacy",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "builtin",
+        "type": "INTEGER",
+        "default": "0"
+      }
+    ],
+    "writer": "store-core.js:2200",
+    "reader": [
+      "store-core.js:2311 (listScorePoints)",
+      "store-core.js:2649 (addScoreHit)",
+      "score-rules.js:162 (applyScoreCaps)"
+    ],
+    "constraints": [
+      "UNIQUE(code)"
+    ],
+    "retention": "首次 openEngagement 播种 25 条内置点（store-core.js:1260）"
+  },
+  {
+    "name": "segment",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "cidr",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "ip_start",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "ip_end",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "org",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "asn",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "country",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "city",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "first_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5982",
+    "reader": [
+      "store-core.js:1408 (listSegments)",
+      "store-core.js:2110 (graph)"
+    ],
+    "constraints": [
+      "PRIMARY KEY(cidr)"
+    ]
+  },
+  {
+    "name": "service",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "port_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "product",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "version",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "cpe",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "provenance",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tool",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "first_seen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "last_seen",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5982",
+    "reader": [
+      "schema.js:444 (v_asset_service)"
+    ]
+  },
+  {
+    "name": "shot",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "point_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "hit_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "vuln_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "target",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "label",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "file",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "TEXT",
+        "default": "'screenshot'"
+      },
+      {
+        "name": "mime",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "bytes",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "width",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "height",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "sha256",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "source_ref",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "captured_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_by_agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5043",
+    "reader": [
+      "store-core.js:5108 (listShots)",
+      "store-core.js:5151 (readShot)"
+    ],
+    "constraints": [
+      "UNIQUE(file)"
+    ]
+  },
+  {
+    "name": "stage",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "code",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "subtitle",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "color",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "goal",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "sections",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tools",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "transition",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "sort_order",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:2144",
+    "reader": [
+      "store-core.js:2162 (listStages)",
+      "store-core.js:4491 (scoreChain)"
+    ],
+    "constraints": [
+      "PRIMARY KEY(code)"
+    ],
+    "retention": "懒播种：首次 listStages/listScorePoints 才建 5 行（store-core.js:2164）"
+  },
+  {
+    "name": "tag",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "entity_kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "entity_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "tag",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "(无写入方)",
+    "reader": [
+      "(无读取方)"
+    ],
+    "constraints": [
+      "PRIMARY KEY(entity_kind, entity_id, tag)"
+    ]
+  },
+  {
+    "name": "tunnel",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "webshell_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "listen",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "entry",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "reach",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "entry_kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": "'unknown'"
+      },
+      {
+        "name": "last_check",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "check_note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "latency_ms",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "pid",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "command",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_by_agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "agent",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:3102",
+    "reader": [
+      "store-core.js:3136 (listTunnels)",
+      "store-core.js:4705 (probeSessions)"
+    ]
+  },
+  {
+    "name": "vuln",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "port_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "cve",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "severity",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "evidence",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "target",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_by_agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "gained",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "agent",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:2866",
+    "reader": [
+      "store-core.js:2902 (listVulns)",
+      "store-core.js:2949 (vulnStats)",
+      "store-core.js:4774 (attackGraph)",
+      "store-core.js:3397 (scoreReport)"
+    ]
+  },
+  {
+    "name": "webshell",
+    "carrier": "sqlite-table",
+    "path": "~/.dsh/redteam/engagements/<slug>/assets.db",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "asset_id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "url",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "shell_type",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "pass_key",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "secret_ref",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "privilege",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "default": "'unknown'"
+      },
+      {
+        "name": "last_check",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "check_note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "latency_ms",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_by_agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "agent",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:3035",
+    "reader": [
+      "store-core.js:3059 (listWebshells)",
+      "store-core.js:4705 (probeSessions)"
+    ],
+    "constraints": [
+      "UNIQUE(url, pass_key)"
+    ]
+  },
+  {
+    "name": "poc",
+    "carrier": "sqlite-table",
+    "path": "knowledge.db  (join(store.root, \"knowledge.db\"), store-core.js:5300)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "default": null
+      },
+      {
+        "name": "code",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "kind",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "cve",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "component",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "versions",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "severity",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "language",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "source_url",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "description",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "usage",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "content",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "path",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "verified",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "verified_note",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "hit_count",
+        "type": "INTEGER",
+        "default": "0"
+      },
+      {
+        "name": "used_on",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "engagement_id",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "engagement_name",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "asset_target",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "found_by_agent",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "tags",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_by",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5465 (savePoc) / store-core.js:5620 (updatePoc) / schema.js:757 (migrateKnowledge)",
+    "reader": [
+      "store-core.js:5538 (searchPocs)",
+      "store-core.js:5590 (getPoc)",
+      "store-core.js:5686 (pocStats)",
+      "store-core.js:1322 (consoleDigest)"
+    ],
+    "constraints": [
+      "UNIQUE(code)"
+    ]
+  },
+  {
+    "name": "sessions.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/sessions.json  (join(root,\"sessions.json\"), store-core.js:1117)",
+    "fields": [
+      {
+        "name": "v",
+        "type": "number",
+        "default": "1"
+      },
+      {
+        "name": "agents",
+        "type": "Record<sessionId, {engagement,name,at}>",
+        "default": "{}"
+      },
+      {
+        "name": "agents[*].engagement",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "agents[*].name",
+        "type": "string",
+        "default": "engagement"
+      },
+      {
+        "name": "agents[*].at",
+        "type": "string(ISO8601)",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:1162 (setSessionBinding)，经 tools.js:294 (recordSessionBinding) 与 store-core.js:827 (activateEngagement op) 调用",
+    "reader": [
+      "store-core.js:1125 (sessionBindings)",
+      "store-core.js:1144 (sessionBinding)",
+      "store-core.js:840 (sessionBinding op)",
+      "store-core.js:910 (attention 第二档)"
+    ],
+    "retention": "写前按 at 倒序截前 200 条，并剔除指向已删靶标的条目（store-core.js:1168-1171）"
+  },
+  {
+    "name": "current",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/current  (join(root,\"current\"), store-core.js:1094)",
+    "fields": [
+      {
+        "name": "(整个文件)",
+        "type": "string (靶标 id)",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:1107 (setActiveEngagement)",
+    "reader": [
+      "store-core.js:1097 (activeEngagementId)",
+      "store-core.js:934 (dispatch 靶标兜底)"
+    ]
+  },
+  {
+    "name": "engagement.yaml",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/engagements/<slug>/engagement.yaml  (store-core.js:1181)",
+    "fields": [
+      {
+        "name": "target_name",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "scope_cidrs",
+        "type": "string[] (写成 [a, b])",
+        "default": "[]"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "default": "'active'"
+      },
+      {
+        "name": "created_at",
+        "type": "string(ISO8601)",
+        "default": null
+      },
+      {
+        "name": "updated_at",
+        "type": "string(ISO8601)",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:205 (writeMeta)，经 store-core.js:1252 (openEngagement)",
+    "reader": [
+      "store-core.js:189 (readMeta)",
+      "store-core.js:1225 (listEngagements)",
+      "store-core.js:1396 (snapshot)"
+    ]
+  },
+  {
+    "name": "settings.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/settings.json  (settings.js:21)",
+    "fields": [
+      {
+        "name": "maxAgents",
+        "type": "number (1..10)",
+        "default": "3 (DEFAULT_MAX_AGENTS, settings.js:15)"
+      }
+    ],
+    "writer": "settings.js:35 (writeSettings) / settings.js:64 (saveMaxAgents) / ui.js:712 (setAgentsMax op)",
+    "reader": [
+      "settings.js:55 (maxAgentsOf)",
+      "tools.js:138 (maxAgentsNow)",
+      "ui.js:718 (agentsStatus)"
+    ]
+  },
+  {
+    "name": "config.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/config.json  (platform-config.js:17)",
+    "fields": [
+      {
+        "name": "version",
+        "type": "number",
+        "default": "1"
+      },
+      {
+        "name": "platform",
+        "type": "'auto'|'windows'|'linux'",
+        "default": "'auto'"
+      },
+      {
+        "name": "toolkitDir",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "nucleiTemplatesDir",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "binDirs",
+        "type": "string[]",
+        "default": "[]"
+      },
+      {
+        "name": "tools",
+        "type": "Record<toolId,string>",
+        "default": "30 个 id 全空串 (platform-config.js:35-53)"
+      },
+      {
+        "name": "env.FOFA_KEY",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "env.REDTEAM_VPS_HOST",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "env.REDTEAM_VPS_KEY",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "notes",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "envAdaptSkip",
+        "type": "boolean",
+        "default": "false"
+      },
+      {
+        "name": "templatesRefreshedAt",
+        "type": "number(ms)",
+        "default": "0"
+      },
+      {
+        "name": "templatesCommit",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "templatesCount",
+        "type": "number",
+        "default": "0"
+      },
+      {
+        "name": "templatesLastError",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "envAdaptConfigured",
+        "type": "boolean",
+        "default": "false"
+      },
+      {
+        "name": "updated_at",
+        "type": "string(ISO8601)",
+        "default": null
+      }
+    ],
+    "writer": "platform-config.js:129 (savePlatformConfig)",
+    "reader": [
+      "platform-config.js:90 (loadPlatformConfig)",
+      "platform-config.js:343 (platformSummary)",
+      "bootstrap-runtime.js:511 (writeConfig)",
+      "bootstrap-runtime.js:410 (refreshTemplatesIfStale)"
+    ]
+  },
+  {
+    "name": "agents/<role>.md",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/engagements/<slug>/agents/<role>.md  (store-core.js:1183)",
+    "fields": [
+      {
+        "name": "(整个文件)",
+        "type": "string (markdown 提示词正文)",
+        "default": "DEFAULT_PROMPTS[role]"
+      }
+    ],
+    "writer": "store-core.js:6220 (savePrompt) / store-core.js:6156 (refreshDefaultPrompts) / store-core.js:6210 (resetPrompts)",
+    "reader": [
+      "store-core.js:6191 (listPrompts)",
+      "role-section.js:104 (readRoleFile)"
+    ]
+  },
+  {
+    "name": "agents/.defaults.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/engagements/<slug>/agents/.defaults.json  (store-core.js:6128)",
+    "fields": [
+      {
+        "name": "<role>",
+        "type": "string (sha256 hex)",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:6138 (writePromptManifest)",
+    "reader": [
+      "store-core.js:6130 (readPromptManifest) → store-core.js:6156 (refreshDefaultPrompts)"
+    ]
+  },
+  {
+    "name": "kb/cve-kev.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/kb/cve-kev.json  (kev.js:29)",
+    "fields": [
+      {
+        "name": "fetched_at",
+        "type": "number(ms)",
+        "default": null
+      },
+      {
+        "name": "count",
+        "type": "number",
+        "default": null
+      },
+      {
+        "name": "items[].cve",
+        "type": "string (CVE-YYYY-NNNN+)",
+        "default": null
+      },
+      {
+        "name": "items[].vendor",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "items[].product",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "items[].name",
+        "type": "string",
+        "default": "''"
+      },
+      {
+        "name": "items[].added",
+        "type": "string (YYYY-MM-DD)",
+        "default": "''"
+      },
+      {
+        "name": "items[].ransomware",
+        "type": "boolean",
+        "default": "false"
+      }
+    ],
+    "writer": "kev.js:147 (refreshKevIfStale) → kev.js:165 writeFileSync",
+    "reader": [
+      "kev.js:94 (kevStatus)",
+      "kev.js:125 (lookupKev)",
+      "store-core.js:60 (intelStatus op)"
+    ],
+    "retention": "TTL 24h；超龄只标 stale 不删（kev.js:110-111）"
+  },
+  {
+    "name": "pocs/.nuclei-index.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/pocs/.nuclei-index.json  (store-core.js:5343)",
+    "fields": [
+      {
+        "name": "built_at",
+        "type": "number(ms)",
+        "default": null
+      },
+      {
+        "name": "dir",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "sig",
+        "type": "string (目录签名)",
+        "default": null
+      },
+      {
+        "name": "items",
+        "type": "array<{path,id,name,severity,tags}>",
+        "default": "[]"
+      }
+    ],
+    "writer": "store-core.js:5387 (#nucleiIndex 重建)",
+    "reader": [
+      "store-core.js:5349 (#nucleiIndex)",
+      "store-core.js:5403 (searchTemplates)",
+      "store-core.js:5393 (templateStats)"
+    ]
+  },
+  {
+    "name": "preset-declare.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/preset-declare.json  (index.js:976)",
+    "fields": [
+      {
+        "name": "ok",
+        "type": "boolean",
+        "default": "false"
+      },
+      {
+        "name": "phase",
+        "type": "string (apply-start|registering|registered|registered-broken|register-failed|read-failed|waiting-registry|timeout-waiting-registry)",
+        "default": null
+      },
+      {
+        "name": "id",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "plugins",
+        "type": "number",
+        "default": null
+      },
+      {
+        "name": "broken",
+        "type": "string|null",
+        "default": null
+      },
+      {
+        "name": "error",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "skillsDir",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "presetDir",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "at",
+        "type": "string(ISO8601)",
+        "default": null
+      }
+    ],
+    "writer": "index.js:979 (writeStatus)",
+    "reader": [
+      "(外部诊断用；包内无读取方)"
+    ]
+  },
+  {
+    "name": "bootstrap.log",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/bootstrap.log  (bootstrap-runtime.js:56)",
+    "fields": [
+      {
+        "name": "(每行)",
+        "type": "string = ISO8601 + 空格 + 消息",
+        "default": null
+      }
+    ],
+    "writer": "bootstrap-runtime.js:56 (logLine)",
+    "reader": [
+      "(人工排查用；包内无读取方)"
+    ]
+  },
+  {
+    "name": "cors-reject.log",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/cors-reject.log  (ui.js:400-406)",
+    "fields": [
+      {
+        "name": "(每行)",
+        "type": "string = ISO8601 \\t path \\t remote \\t host \\t origin \\t site",
+        "default": null
+      }
+    ],
+    "writer": "ui.js:398 (logCorsReject)",
+    "reader": [
+      "(人工排查用；包内无读取方)"
+    ]
+  },
+  {
+    "name": "shots/<file>",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/engagements/<slug>/shots/  (store-core.js:5029)",
+    "fields": [
+      {
+        "name": "(二进制)",
+        "type": "PNG | JPEG | WebP",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5043 (addShot)",
+    "reader": [
+      "store-core.js:5151 (readShot)",
+      "store-core.js:5131 (shotUrlOf)"
+    ]
+  },
+  {
+    "name": "attack-files/<dir>/<name>",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/engagements/<slug>/attack-files/<slugTarget(target)>/  (store-core.js:5219)",
+    "fields": [
+      {
+        "name": "(任意文本/二进制)",
+        "type": "script | poc | exp",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5226 (addAttackFile)",
+    "reader": [
+      "store-core.js:5284 (readAttackFile)",
+      "store-core.js:5273 (attackFileTree)"
+    ]
+  },
+  {
+    "name": "runs/legacy-score-<stamp>.json",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/engagements/<slug>/runs/  (store-core.js:2245)",
+    "fields": [
+      {
+        "name": "archived_at",
+        "type": "string(ISO8601)",
+        "default": null
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "default": null
+      },
+      {
+        "name": "points",
+        "type": "array<score_point row>",
+        "default": "[]"
+      },
+      {
+        "name": "hits",
+        "type": "array<score_hit row>",
+        "default": "[]"
+      }
+    ],
+    "writer": "store-core.js:2245-2253 (seedScorePoints 清理旧得分点前存档)",
+    "reader": [
+      "(人工审计用；包内无读取方)"
+    ]
+  },
+  {
+    "name": "pocs/<code>/<file>",
+    "carrier": "file",
+    "path": "~/.dsh/redteam/pocs/  (store-core.js:5436)",
+    "fields": [
+      {
+        "name": "(正文)",
+        "type": "string (脚本 / 原始请求)",
+        "default": null
+      }
+    ],
+    "writer": "store-core.js:5490 (savePoc 落盘)",
+    "reader": [
+      "store-core.js:5590 (getPoc)",
+      "store-core.js:2279 (redteam_poc_get 工具)"
+    ]
+  }
+]

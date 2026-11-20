@@ -262,6 +262,67 @@ console.log("[11] 演练台「凭据与文件」页");
   hasCred && hasAccess ? ok("credentials / access 两个 op 后端存在") : bad("credentials 或 access 后端缺失");
 }
 
+console.log("[12] P0 静默失败四件");
+{
+  const schema = fs.readFileSync(path.join(PKG, "lib/redteam/schema.js"), "utf8");
+  const core = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
+
+  // G-1：两个常量必须在 schema.js 定义，且 store-core 不再自己定义
+  schema.includes("export const SCOPE_SQL =") && schema.includes("export const LEGACY_STAGE_MAP =")
+    ? ok("schema.js 定义并导出 SCOPE_SQL / LEGACY_STAGE_MAP")
+    : bad("schema.js 缺少 SCOPE_SQL 或 LEGACY_STAGE_MAP 的导出定义");
+  /^const SCOPE_SQL = /m.test(core) || /^export const LEGACY_STAGE_MAP = /m.test(core)
+    ? bad("store-core.js 仍有本地定义（会与 schema.js 的副本漂移）")
+    : ok("store-core.js 无本地副本");
+  /SCOPE_SQL, LEGACY_STAGE_MAP,/.test(core) && /export \{ LEGACY_STAGE_MAP \}/.test(core)
+    ? ok("store-core.js 从 schema.js 引入并原样再导出（对外 API 不变）")
+    : bad("store-core.js 未从 schema.js 引入两个常量，或丢了再导出");
+
+  // G-2/G-3：显式集合 + 未知 op 提前抛
+  const writeBlock = core.match(/const WRITE_OPS = new Set\(\[([\s\S]*?)\]\)/);
+  const readBlock = core.match(/const READ_OPS = new Set\(\[([\s\S]*?)\]\)/);
+  if (!writeBlock || !readBlock) bad("WRITE_OPS / READ_OPS 集合缺失");
+  else {
+    const parse = (s) => [...s.matchAll(/'([A-Za-z][A-Za-z0-9]*)'/g)].map((m) => m[1]);
+    const W = new Set(parse(writeBlock[1]));
+    const R = new Set(parse(readBlock[1]));
+    ok(`WRITE_OPS ${W.size} 条 / READ_OPS ${R.size} 条`);
+    const both = [...W].filter((x) => R.has(x));
+    both.length === 0 ? ok("两个集合无交集") : bad(`同时被当成读和写：${both.join(", ")}`);
+
+    // 兜底分支必须先用集合挡住未知 op，否则 `unknown op` 永远抛不出来
+    /if \(!READ_OPS\.has\(op\)\) throw new Error\(`unknown op: \$\{op\}`\)/.test(core)
+      ? ok("未知 op 在兜底之前抛出")
+      : bad("兜底分支未拦住未知 op（拼错的 op 会返回 ok:true）");
+    /\/\^\(add\|save\|update\|delete\|import\|assess\|open\)\//.test(core)
+      ? bad("仍有前缀正则判写操作（漏 shotAdd/shotDelete/assetTest/resetPrompts）")
+      : ok("已无前缀正则判写操作");
+
+    // 动态对账：guard 之后出现的每个 op 字面量都必须被两个集合覆盖
+    const guardAt = core.indexOf("if (!id) {");
+    // 只对账 dispatch 本体：dispatchAsync 单独处理 probeSessions，不在这两个集合里
+    const asyncAt = core.indexOf("export async function dispatchAsync");
+    const body = guardAt < 0 ? "" : core.slice(guardAt, asyncAt > guardAt ? asyncAt : undefined);
+    const seen = new Set([...body.matchAll(/op === '([A-Za-z][A-Za-z0-9]*)'/g)].map((m) => m[1]));
+    const missing = [...seen].filter((x) => !W.has(x) && !R.has(x));
+    guardAt < 0 ? bad("找不到 `if (!id) {` 兜底分支") : null;
+    missing.length === 0
+      ? ok(`guard 之后的 ${seen.size} 个 op 全部被集合覆盖`)
+      : bad(`集合漏了 ${missing.length} 个 op：${missing.join(", ")}`);
+  }
+
+  // G-4：模板检索的 category / offset 与 byCategory
+  /searchTemplates\(q, limit = 40, offset = 0, category = ''\)/.test(core)
+    ? ok("searchTemplates 收 4 个参数（q / limit / offset / category）")
+    : bad("searchTemplates 签名仍是 (q, limit)，category 会被静默丢弃");
+  /return \{ dir: dir \|\| null, total: items\.length, cve, byCategory \}/.test(core)
+    ? ok("templateStats 返回 byCategory")
+    : bad("templateStats 未返回 byCategory（面板分类计数恒为 0）");
+  /\.map\(\(\[code, n\]\) => \(\{ code, name: pocCategoryName\(code\), n \}\)\)/.test(core)
+    ? ok("byCategory 同时给出 code（面板用）与 name（工具文案用）")
+    : bad("byCategory 只给出一种键，面板或工具会拿到 undefined");
+}
+
 console.log("");
 if (failed) { console.error(`验收失败：${failed} 项`); process.exit(1); }
 console.log("验收通过（本次全程只读，宿主未被修改）。");

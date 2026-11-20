@@ -318,6 +318,221 @@ export function buildEdits(repo = resolveRepo()) {
         '          // [dsh-purge-plus] ENOTDIR = 这个「profile」其实是文件（.DS_Store）\n' +
         '          if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;',
     },
+
+    // ══ G. P0：静默失败四件 ══════════════════════════════════════════
+    // 共同点：**读代码看不出来，跑起来也不报错**，只是行为悄悄不对。
+    // 每条都配了闸门（scripts/verify.mjs 第 [12] 组）。
+
+    // G-1. migrate() 引用了两个根本没定义、也没 import 的常量
+    //      schema.js 的 migrate() 用 LEGACY_STAGE_MAP 与 SCOPE_SQL，但本文件只
+    //      import 了 parseTargetPort。两处引用都在 try{}catch{} 里，ReferenceError
+    //      被 catch 吞成「忽略」→ 老库 stage_code 回填与 asset.scope 回填从未执行。
+    //      修法：常量搬进 schema.js（它自称「数据形状唯一定义处」，且是 store-core
+    //      的依赖叶子，放这里不产生循环），store-core 改成 import 并保留对外导出。
+    {
+      file: "lib/redteam/schema.js",
+      required: true,
+      find: "import { parseTargetPort } from './score-rules.js'",
+      replace:
+        "import { parseTargetPort } from './score-rules.js'\n" +
+        "\n" +
+        "/* [dsh-purge-plus] 这两个常量原定义在 store-core.js，却被本文件的 migrate() 引用。\n" +
+        "   两处引用都包在 try{}catch{} 里，ReferenceError 被 catch 吞掉 → 迁移静默 no-op。\n" +
+        "   搬到这里：schema.js 是「数据形状的唯一定义处」，也是 store-core 的依赖叶子，\n" +
+        "   放这里不产生循环依赖。store-core 原样再导出，对外 API 不变。 */\n" +
+        "\n" +
+        "/**\n" +
+        " * 内外网判定（SQL 片段，作用于 asset.ip）：\n" +
+        " * RFC1918 私网 + 回环 + 链路本地 + CGNAT 视为内网，其余为外网。\n" +
+        " */\n" +
+        "export const SCOPE_SQL = `CASE\n" +
+        "  WHEN ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '127.%' OR ip LIKE '169.254.%'\n" +
+        "    OR (ip LIKE '172.%' AND CAST(substr(ip, 5, instr(substr(ip, 5), '.') - 1) AS INTEGER) BETWEEN 16 AND 31)\n" +
+        "    OR (ip LIKE '100.%' AND CAST(substr(ip, 5, instr(substr(ip, 5), '.') - 1) AS INTEGER) BETWEEN 64 AND 127)\n" +
+        "  THEN 'internal' ELSE 'external' END`\n" +
+        "\n" +
+        "/** 旧攻击链 stage → 新阶段 code 的兜底映射。 */\n" +
+        "export const LEGACY_STAGE_MAP = {\n" +
+        "  recon: 'recon', vuln: 'internet', exploit: 'internet',\n" +
+        "  access: 'internal', pivot: 'boundary', data: 'internal', other: 'recon',\n" +
+        "}",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "/**\n" +
+        " * 内外网判定（SQL 片段，作用于 asset.ip）：\n" +
+        " * RFC1918 私网 + 回环 + 链路本地 + CGNAT 视为内网，其余为外网。\n" +
+        " */\n" +
+        "const SCOPE_SQL = `CASE\n" +
+        "  WHEN ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '127.%' OR ip LIKE '169.254.%'\n" +
+        "    OR (ip LIKE '172.%' AND CAST(substr(ip, 5, instr(substr(ip, 5), '.') - 1) AS INTEGER) BETWEEN 16 AND 31)\n" +
+        "    OR (ip LIKE '100.%' AND CAST(substr(ip, 5, instr(substr(ip, 5), '.') - 1) AS INTEGER) BETWEEN 64 AND 127)\n" +
+        "  THEN 'internal' ELSE 'external' END`",
+      replace:
+        "/* [dsh-purge-plus] SCOPE_SQL 已移到 schema.js（migrate() 与查询共用同一份定义）。 */",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "/** 旧攻击链 stage → 新阶段 code 的兜底映射。 */\n" +
+        "export const LEGACY_STAGE_MAP = {\n" +
+        "  recon: 'recon', vuln: 'internet', exploit: 'internet',\n" +
+        "  access: 'internal', pivot: 'boundary', data: 'internal', other: 'recon',\n" +
+        "}",
+      replace:
+        "/* [dsh-purge-plus] LEGACY_STAGE_MAP 定义移到 schema.js（migrate() 要用）；\n" +
+        "   本文件在 import 之后原样再导出，对外 API 不变。 */",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "import {\n" +
+        "  DDL, KNOWLEDGE_DDL, ASSET_FTS_DDL, POC_FTS_DDL, HAS_FTS5,\n" +
+        "  POC_CATEGORIES, pocCategoryName, guessPocCategory,\n" +
+        "  migrate, migrateKnowledge,\n" +
+        "} from './schema.js'",
+      replace:
+        "import {\n" +
+        "  DDL, KNOWLEDGE_DDL, ASSET_FTS_DDL, POC_FTS_DDL, HAS_FTS5,\n" +
+        "  POC_CATEGORIES, pocCategoryName, guessPocCategory,\n" +
+        "  SCOPE_SQL, LEGACY_STAGE_MAP, // [dsh-purge-plus] 定义已搬到 schema.js\n" +
+        "  migrate, migrateKnowledge,\n" +
+        "} from './schema.js'\n" +
+        "\n" +
+        "/* [dsh-purge-plus] 对外 API 不变：原先 `export const LEGACY_STAGE_MAP` 定义在本文件，\n" +
+        "   现在从 schema.js 引入后原样再导出，import 它的模块不需要改。 */\n" +
+        "export { LEGACY_STAGE_MAP }",
+    },
+
+    // G-2/G-3. 无靶标时的写操作判定 + 未知 op 被兜底吞成 ok:true
+    //   原版：`const writing = /^(add|save|update|delete|import|assess|open)/.test(op)`
+    //   漏了 shotAdd / shotDelete / assetTest / resetPrompts 四条 → 无靶标时它们
+    //   走「只读空结果」分支，返回 { ok: true, items: [], ... }，调用方以为写进去了。
+    //   更糟的是同一行的兜底 `return { ok:true, items:[], ... }` 对**任何**未知 op
+    //   都成立，于是 dispatch 末尾的 `throw new Error('unknown op: ...')` 永远到不了
+    //   ——拼错的 op 名静默变成「成功、空结果」。
+    //   修法：显式集合；未知 op 在兜底之前就抛。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "export function dispatch(store, req = {}) {\n" +
+        "  const op = typeof req.op === 'string' ? req.op.trim() : ''",
+      replace:
+        "/* [dsh-purge-plus] 需要靶标的 op 分两类。原版用前缀正则判「写」，漏了四条；\n" +
+        "   而兜底分支对任何未知 op 都返回 ok:true，把 `unknown op` 的抛错彻底掩盖。 */\n" +
+        "const WRITE_OPS = new Set([\n" +
+        "  'addVuln', 'updateVuln', 'addCredential', 'addAccess', 'addWebshell', 'updateWebshell',\n" +
+        "  'shotAdd', 'shotDelete', 'addTunnel', 'updateTunnel', 'addHttpEvidence', 'addChainStep',\n" +
+        "  'assetTest', 'assessAsset', 'saveScorePoint', 'deleteScorePoint', 'addScoreHit',\n" +
+        "  'saveStage', 'addAttackFile', 'import', 'savePrompt', 'resetPrompts',\n" +
+        "])\n" +
+        "\n" +
+        "const READ_OPS = new Set([\n" +
+        "  'snapshot', 'assets', 'asset', 'graph', 'attackGraph', 'stats', 'vulns', 'vulnStats',\n" +
+        "  'credentials', 'access', 'sessions', 'webshells', 'tunnels', 'shots', 'shotData',\n" +
+        "  'domains', 'web', 'httpEvidence', 'chain', 'report', 'scores', 'scoreChain', 'scoreReport',\n" +
+        "  'activeTests', 'testStats', 'consoleDigest', 'stages', 'reportTargets', 'discoveryTimeline',\n" +
+        "  'attackFiles', 'readAttackFile', 'prompts',\n" +
+        "])\n" +
+        "\n" +
+        "export function dispatch(store, req = {}) {\n" +
+        "  const op = typeof req.op === 'string' ? req.op.trim() : ''",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      const writing = /^(add|save|update|delete|import|assess|open)/.test(op)\n" +
+        "      if (writing) return { ok: false, error: '请先在顶部选择或创建一个靶标' }\n" +
+        "      return { ok: true, items: [], total: 0, stats: null, segments: [], stages: [], roles: [] }",
+      replace:
+        "      // [dsh-purge-plus] 写操作用显式集合判（前缀正则漏了 shotAdd/shotDelete/\n" +
+        "      // assetTest/resetPrompts）；未知 op 在兜底之前抛，不再伪装成空结果。\n" +
+        "      if (WRITE_OPS.has(op)) return { ok: false, error: '请先在顶部选择或创建一个靶标' }\n" +
+        "      if (!READ_OPS.has(op)) throw new Error(`unknown op: ${op}`)\n" +
+        "      return { ok: true, items: [], total: 0, stats: null, segments: [], stages: [], roles: [] }",
+    },
+
+    // G-4. 模板检索的 category / offset 被静默丢弃，templateStats 缺 byCategory
+    //   tools.js 的 redteam_poc_search 调的是
+    //     store.searchTemplates(q, limit, 0, category)
+    //   而 store 的签名是 searchTemplates(q, limit = 40) —— 第 3、4 个参数进不来，
+    //   「按归类筛模板」这个已写进工具 schema 的参数完全无效。
+    //   同时面板按 `templates.byCategory` 的 { code, n } 画分类计数，
+    //   templateStats() 却只返回 { dir, total, cve } → 分类计数永远是 0。
+    //   归类判定复用 guessPocCategory（推测逻辑只有一份），不再写第二套关键词。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  templateStats() {\n" +
+        "    const { dir, items } = this.#nucleiIndex()\n" +
+        "    const cve = items.filter((x) => /cve-\\d{4}-\\d+/i.test(x[0])).length\n" +
+        "    return { dir: dir || null, total: items.length, cve }\n" +
+        "  }",
+      replace:
+        "  templateStats() {\n" +
+        "    const { dir, items } = this.#nucleiIndex()\n" +
+        "    const cve = items.filter((x) => /cve-\\d{4}-\\d+/i.test(x[0])).length\n" +
+        "    /* [dsh-purge-plus] byCategory：面板按 { code, n } 画分类计数，\n" +
+        "       工具侧按 { name, n } 生成文字，两个键都给出。归类复用 guessPocCategory，\n" +
+        "       与知识库同一套口径。 */\n" +
+        "    const counts = new Map()\n" +
+        "    for (const [path, name, , tags] of items) {\n" +
+        "      const code = guessPocCategory(path + ' ' + name + ' ' + tags)\n" +
+        "      counts.set(code, (counts.get(code) || 0) + 1)\n" +
+        "    }\n" +
+        "    const byCategory = [...counts.entries()]\n" +
+        "      .map(([code, n]) => ({ code, name: pocCategoryName(code), n }))\n" +
+        "      .sort((a, b) => b.n - a.n)\n" +
+        "    return { dir: dir || null, total: items.length, cve, byCategory }\n" +
+        "  }",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  searchTemplates(q, limit = 40) {\n" +
+        "    const { dir, items } = this.#nucleiIndex()\n" +
+        "    if (dir === null) return { dir: null, total: 0, items: [] }\n" +
+        "    const raw = String(q || '').trim()\n" +
+        "    if (raw === '') return { dir, total: items.length, items: [] }\n" +
+        "    const needle = raw.toLowerCase()\n" +
+        "    const out = []\n" +
+        "    for (const [path, name, severity, tags] of items) {\n" +
+        "      const hay = (path + ' ' + name + ' ' + tags).toLowerCase()\n" +
+        "      if (hay.includes(needle)) out.push({ path, name, severity, tags })\n" +
+        "      if (out.length >= limit) break\n" +
+        "    }\n" +
+        "    return { dir, total: items.length, items: out }\n" +
+        "  }",
+      replace:
+        "  /* [dsh-purge-plus] 补上 offset 与 category：\n" +
+        "     · tools.js 的 redteam_poc_search 一直在传 (q, limit, 0, category)，\n" +
+        "       原签名只有 (q, limit)，后两个参数被静默丢弃；\n" +
+        "     · 面板要 matched / offset 才能显示「第几页 / 命中多少」；\n" +
+        "     · 归类判定复用 guessPocCategory，与知识库同一口径。 */\n" +
+        "  searchTemplates(q, limit = 40, offset = 0, category = '') {\n" +
+        "    const { dir, items } = this.#nucleiIndex()\n" +
+        "    if (dir === null) return { dir: null, total: 0, matched: 0, offset: 0, items: [] }\n" +
+        "    const cap = Math.min(Number(limit) || 40, 200)\n" +
+        "    const skip = Math.max(0, Number(offset) || 0)\n" +
+        "    const cat = String(category || '').trim()\n" +
+        "    const needle = String(q || '').trim().toLowerCase()\n" +
+        "    const out = []\n" +
+        "    for (const [path, name, severity, tags] of items) {\n" +
+        "      if (cat && guessPocCategory(path + ' ' + name + ' ' + tags) !== cat) continue\n" +
+        "      if (needle && !(path + ' ' + name + ' ' + tags).toLowerCase().includes(needle)) continue\n" +
+        "      out.push({ path, name, severity, tags })\n" +
+        "    }\n" +
+        "    return { dir, total: items.length, matched: out.length, offset: skip, items: out.slice(skip, skip + cap) }\n" +
+        "  }",
+    },
   ];
 }
 
