@@ -97,6 +97,102 @@ for (const [i, e] of EDITS.entries()) {
 }
 log(`✓ 编辑完成 applied=${applied} warned=${warned}`);
 
+// ── 3b. 用户可见文案里的上游品牌残留 ────────────────────────────────
+// 这些不是注释，是面板上真会显示出来的字：兼容性提示、/dsh-purge/community 的
+// name 字段、安装失败的报错。改名后还写着「dsh-purge Community / 社区版」会让人
+// 以为装错了包。逐条限定命中次数，上游改文案就构建失败，不会静默漏改。
+const BRAND_FIXES = [
+  ["client.js", "\"dsh-purge Community {version}", "\"dsh-purge-plus {version}", 2],
+  ["lib/index.js", 'name:"dsh-purge Community"', 'name:"dsh-purge-plus"', 1],
+  ["lib/installed-package.js", "当前 profile 未找到社区版插件安装", "当前 profile 未找到 dsh-purge-plus 安装", 1],
+  ["lib/installed-package.js", "当前 profile 有多个社区版安装，无法确定生效入口", "当前 profile 有多个 dsh-purge-plus 安装，无法确定生效入口", 1],
+];
+for (const [file, from, to, want] of BRAND_FIXES) {
+  const fp = path.join(PKG, file);
+  if (!fs.existsSync(fp)) die(`品牌残留：${file} 不存在`);
+  const src = fs.readFileSync(fp, "utf8");
+  const hits = src.split(from).length - 1;
+  if (hits !== want) die(`品牌残留：${file} 里 ${JSON.stringify(from.slice(0, 40))} 命中 ${hits} 次（要求 ${want}）`);
+  fs.writeFileSync(fp, src.split(from).join(to));
+}
+log(`✓ 用户可见文案去上游品牌（${BRAND_FIXES.length} 条）`);
+
+// ── 3c. 演练台：移植 safe 的「凭据与文件」页 ────────────────────────
+// 代码块放在 overlay/snippets/artifacts-tab.js（长段 JSX，不适合塞进字符串数组）。
+//
+// 同一个 UI 在本包里有**两份编译产物**：
+//   lib/redteam/client.js  独立全屏窗口用，hyperscript 叫 h，hooks 走 React.useState
+//   client.js              面板内嵌那份，hyperscript 叫 h2，hooks 走 import_react2.default.useState
+// 两份都要改，否则「面板里点开」和「全面浏览新窗口」会看到不一样的页签。
+const SNIPPET_SRC = fs.readFileSync(path.join(ROOT, "overlay", "snippets", "artifacts-tab.js"), "utf8");
+
+/** 把 snippet 适配到某一份产物的方言。 */
+function adaptSnippet(text, dialect) {
+  if (dialect === "redteam") return text;
+  // panel：h → h2，React.xxx → import_react2.default.xxx，整体缩进减 2 空格
+  const swapped = text
+    .replace(/\bReact\./g, "import_react2.default.")
+    .replace(/(^|[^\w$.])h\(/g, "$1h2(");
+  return swapped
+    .split("\n")
+    .map((line) => (line.startsWith("  ") ? line.slice(2) : line))
+    .join("\n");
+}
+
+const SNIPPETS = [
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", what: "凭据与文件组件",
+    anchor: "    function FindingsTab(props) {", mode: "before",
+  },
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", what: "页签按钮",
+    anchor: "        ['chain', '攻击链'], ['scores', '得分目标'], ['report', '报告'],",
+    mode: "before", text: "        ['artifacts', '凭据与文件'],\n",
+  },
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", what: "body 分发",
+    anchor: "      else if (st.tab === 'scores') body = h(ScoreTab, { engagement: eng, refreshKey: refreshKey })\n",
+    mode: "before",
+    text: "      else if (st.tab === 'artifacts') body = h(ArtifactsTab, { engagement: eng, refreshKey: refreshKey })\n",
+  },
+  {
+    file: "client.js", dialect: "panel", what: "凭据与文件组件（面板内嵌版）",
+    anchor: "  function FindingsTab(props) {", mode: "before",
+  },
+  {
+    file: "client.js", dialect: "panel", what: "页签按钮（面板内嵌版）",
+    anchor: '      ["chain", "', mode: "before", text: '      ["artifacts", "\u51ED\u636E\u4E0E\u6587\u4EF6"],\n',
+  },
+  {
+    file: "client.js", dialect: "panel", what: "body 分发（面板内嵌版）",
+    anchor: '    else if (st.tab === "scores")\n', mode: "before",
+    text: '    else if (st.tab === "artifacts")\n      body = h2(ArtifactsTab, { engagement: eng, refreshKey });\n',
+  },
+];
+for (const sn of SNIPPETS) {
+  const fp = path.join(PKG, sn.file);
+  const src = fs.readFileSync(fp, "utf8");
+  const hits = src.split(sn.anchor).length - 1;
+  if (hits !== 1) die(`演练台移植：${sn.what} 锚点命中 ${hits} 次（要求 1 次）`);
+  const body = sn.text !== undefined ? sn.text : adaptSnippet(SNIPPET_SRC, sn.dialect);
+  const next = sn.mode === "before" ? src.replace(sn.anchor, () => body + sn.anchor)
+    : src.replace(sn.anchor, () => sn.anchor + body);
+  fs.writeFileSync(fp, next);
+}
+log(`✓ 演练台「凭据与文件」页已并入（${SNIPPETS.length} 处，两份产物）`);
+
+// ── 3d. 授权弹窗「不同意」把面板留在非法页签 ────────────────────────
+// dockBus 的初始值是 tab:"clean"，而 "clean" 既不在页签表也没有 body 分支，
+// 点「不同意」后整块面板是空的。落到 status 才是合法状态。
+{
+  const fp = path.join(PKG, "client.js");
+  const src = fs.readFileSync(fp, "utf8");
+  const hits = src.split('tab: "clean"').length - 1;
+  if (hits !== 2) die(`tab:"clean" 命中 ${hits} 次（要求 2 次）`);
+  fs.writeFileSync(fp, src.split('tab: "clean"').join('tab: "status"'));
+  log('✓ 非法页签 "clean" → "status"（2 处）');
+}
+
 // ── 4. 重写 package.json ──────────────────────────────────────────
 const pkgPath = path.join(PKG, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
@@ -136,6 +232,62 @@ log(`✓ package.json 重写：${pkg.name}@${pkg.version}  dshTarget=${pkg.dshTa
     fs.writeFileSync(ymlPath, yml.split(baseName).join(pkg.name));
     log(`✓ cordis.patch.yml 插件名 ${baseName} → ${pkg.name}（${hits} 处）`);
   }
+}
+
+// ── 4c. 重写 client.js 的浏览器模块 id ──────────────────────────────
+// 宿主 dsh-client-modules 的规则：**manifest 的包名就是浏览器模块名**
+// （dsh-client-modules/lib/index.js:150 "The manifest package name identifies
+// the browser module"）。预构建的 client.js 里 `__ModuleLoader__.load({id:...})`
+// 仍是上游包名时，宿主按新包名找不到模块 → 整个 UI 静默不挂载：
+// 侧栏没有按钮、插件详情页没有配置项，但服务端 HTTP 接口一切正常。
+// 三处都要改：模块 id、panel 名、详情页 slot key。
+{
+  const cliPath = path.join(PKG, "client.js");
+  if (fs.existsSync(cliPath)) {
+    const js = fs.readFileSync(cliPath, "utf8");
+    const hits = js.split(basePkg.name).length - 1;
+    if (hits === 0) die("client.js 里找不到上游包名，浏览器模块 id 无法重写");
+    fs.writeFileSync(cliPath, js.split(basePkg.name).join(pkg.name));
+    log(`✓ client.js 浏览器模块名 ${basePkg.name} → ${pkg.name}（${hits} 处）`);
+  }
+}
+
+// ── 4c-2. 重写 client.js 里的界面版本 ───────────────────────────────
+// 宿主把「服务端报告的版本」和「界面自己写的版本」对比，不一致就在面板顶部
+// 挂一条黄色告警（client.js 里那段 \u5B98\u65B9\u7248\u672C … \u754C\u9762 …）。
+// 上游把界面版本写死在 5 个地方，改名/升版后必须同步，否则面板永远喊不一致。
+{
+  const cliPath = path.join(PKG, "client.js");
+  if (fs.existsSync(cliPath)) {
+    let js = fs.readFileSync(cliPath, "utf8");
+    const verHits = js.split(baseVersion).length - 1;
+    if (verHits === 0) die(`client.js 里找不到界面版本 ${baseVersion}`);
+    js = js.split(baseVersion).join(version);
+    // 面板徽章：\u793E\u533A\u7248 <ver> → Plus <ver>
+    const badgeOld = `\\u793E\\u533A\\u7248 ${version}`;
+    const badgeHits = js.split(badgeOld).length - 1;
+    if (badgeHits) js = js.split(badgeOld).join(`Plus ${version}`);
+    // 更新按钮：\u68C0\u67E5\u793E\u533A\u7248\u66F4\u65B0 → \u68C0\u67E5\u66F4\u65B0
+    const btnOld = "\\u68C0\\u67E5\\u793E\\u533A\\u7248\\u66F4\\u65B0";
+    const btnHits = js.split(btnOld).length - 1;
+    if (btnHits) js = js.split(btnOld).join("\\u68C0\\u67E5\\u66F4\\u65B0");
+    fs.writeFileSync(cliPath, js);
+    log(`✓ client.js 界面版本 ${baseVersion} → ${version}（${verHits} 处）· 徽章 ${badgeHits} 处 · 按钮 ${btnHits} 处`);
+  }
+}
+
+// ── 4d. 安装元数据指向本仓库 ────────────────────────────────────────
+// dsh.install 里的 tarball / git 仍指向上游，面板的「重新安装」会把人带回
+// community。改成自己的发行地址。
+if (pkg.dsh?.install) {
+  const rel = `https://github.com/${REPO_SLUG}`;
+  pkg.dsh.install = {
+    ...pkg.dsh.install,
+    tarball: `${rel}/releases/download/v${version}/dsh-purge-plus-${version}.tgz`,
+    git: `${rel}.git`,
+  };
+  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+  log(`✓ dsh.install 指向 ${REPO_SLUG}`);
 }
 
 // ── 5. 语法与补丁表自检 ───────────────────────────────────────────

@@ -276,6 +276,48 @@ export function buildEdits(repo = resolveRepo()) {
       replace: "label: `dsh-purge-plus ${version}`, // [dsh-purge-plus]",
     },
 
+    // ══ F. preset-presence：.DS_Store 让探测整体退化成 unknown ═══════
+    // ~/.dsh/profiles/ 下通常有 macOS 的 .DS_Store（是文件，不是目录）。
+    // 原版遍历 profiles 里的每一项去读 <name>/package.json，读 .DS_Store/package.json
+    // 抛 ENOTDIR，而这里只放行 ENOENT → 外层 catch 把整个探测吞成 "unknown"，
+    // #76 于是永远无法静态核对（自检面板里「官方身份剥离」这一层显示 unknown）。
+    {
+      file: "lib/preset-presence.js",
+      required: true,
+      find: "    for (const name of names) {",
+      replace:
+        "    for (const name of names) {\n" +
+        '      if (name.startsWith(".")) continue; // [dsh-purge-plus] 跳过 .DS_Store 等隐藏项',
+    },
+    {
+      file: "lib/preset-presence.js",
+      required: true,
+      find: '        if (e.code === "ENOENT") continue;',
+      replace:
+        '        // [dsh-purge-plus] .DS_Store 是文件，读它的 package.json 抛 ENOTDIR；\n' +
+        '        // 只放行 ENOENT 会让整个探测退化成 unknown。\n' +
+        '        if (e.code === "ENOENT" || e.code === "ENOTDIR") continue;',
+    },
+    // F-2：真正的病灶在这里。liangshenRoots 遍历 profiles 下的每一项拼候选路径，
+    // profiles 里混着 macOS 的 .DS_Store（文件），拼出来的
+    // .DS_Store/node_modules/... 用 lstatSync 探测会抛 ENOTDIR，
+    // 而下面的 catch 只放行 ENOENT → 整个 liangshenPresence 退化成 "unknown"。
+    {
+      file: "lib/preset-presence.js",
+      required: true,
+      find: "  for (const name of profiles) {",
+      replace:
+        "  for (const name of profiles) {\n" +
+        '    if (name.startsWith(".")) continue; // [dsh-purge-plus] .DS_Store 不是 profile',
+    },
+    {
+      file: "lib/preset-presence.js",
+      required: true,
+      find: '          if (e.code !== "ENOENT") throw e;',
+      replace:
+        '          // [dsh-purge-plus] ENOTDIR = 这个「profile」其实是文件（.DS_Store）\n' +
+        '          if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;',
+    },
   ];
 }
 

@@ -12,7 +12,7 @@ Separate the host layer from the model layer: whether the model is willing to an
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
-Version **1.7.20-plus.2** · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
+Version **1.7.20-plus.3** · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
 
 </div>
 
@@ -54,7 +54,7 @@ It does not change the model, the cloud account, or upload prompts and configura
 ```
 base    dsh-purge-community 1.7.20   MIT         88 host patches · patch engine · ops layer
 port    dsh-purge-safe      2.0.0    Apache-2.0  a branch with a wider capability surface
-result  dsh-purge-plus      1.7.20-plus.2        93 patches · 8 read-only checks
+result  dsh-purge-plus      1.7.20-plus.3        93 patches · 11 read-only checks
 ```
 
 This repo is **not** a fork of community and **not** a fork of safe. It treats both upstreams as read-only inputs:
@@ -134,17 +134,17 @@ Here `vendor/` is always a verbatim upstream copy, and every change is "new file
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 8 read-only checks, host untouched
+node scripts/verify.mjs     # 11 read-only checks, host untouched
 ```
 
-Then DSH panel → **Plugins → Install from file** → pick `dist/dsh-purge-plus-1.7.20-plus.2.tgz` → restart DSH.
+Then DSH panel → **Plugins → Install from file** → pick `dist/dsh-purge-plus-1.7.20-plus.3.tgz` → restart DSH.
 
 ### Option 2: command line
 
 ```bash
 cd ~/.dsh/profiles/desktop
 pnpm remove dsh-purge-community
-pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-1.7.20-plus.2.tgz"
+pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-1.7.20-plus.3.tgz"
 ```
 
 Afterwards confirm `dsh.profile.bundles` in `package.json` contains **`dsh-purge-plus`** and that `node_modules/dsh-purge-plus/` exists.
@@ -208,7 +208,7 @@ Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · 
 | Swap vendor | replace `vendor/community` wholesale | — |
 | Replay overlay | insert 26 anchors one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
-| Verify | 8 read-only checks | any red → non-zero exit |
+| Verify | 11 read-only checks | any red → non-zero exit |
 
 "Exactly N hits" is a hard constraint: 0 hits means the anchor rotted after a host upgrade; ≥2 means it would patch the wrong place. Both fail the build.
 
@@ -249,7 +249,7 @@ overlay/files/             new files
 overlay/edits.mjs          26 precise anchor insertions
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         8 read-only checks
+scripts/verify.mjs         11 read-only checks
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify
 docs/PORT-MATRIX-V2.md     exhaustive diff + verdicts + 11 corrections
 docs/COMPAT.md             host compatibility report

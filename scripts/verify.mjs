@@ -223,6 +223,45 @@ console.log("[8] cordis.patch.yml 插件名");
   stray === 0 ? ok("无上游包名残留") : bad(`仍有 ${stray} 处上游包名`);
 }
 
+console.log("[9] client.js 浏览器模块名");
+{
+  const js = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+  const name = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")).name;
+  const m = js.match(/__ModuleLoader__\.load\(\{id:"([^"]+)"/);
+  m && m[1] === name ? ok(`模块 id = ${m[1]}`) : bad(`模块 id = ${m ? m[1] : "未找到"}，应为 ${name}`);
+  const stray = (js.match(/dsh-purge-community/g) || []).length;
+  stray === 0 ? ok("无上游包名残留") : bad(`client.js 仍有 ${stray} 处上游包名`);
+}
+
+console.log("[10] client.js 界面版本");
+{
+  const pkg2 = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
+  const js = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+  const base = pkg2.version.replace(/-plus\.\d+$/, "");
+  const uiVers = new Set((js.match(/1\.7\.20[0-9.\-a-z]*/g) || []));
+  const stale = [...uiVers].filter((v) => v !== pkg2.version);
+  stale.length === 0 ? ok(`界面版本 = ${pkg2.version}`) : bad(`界面版本残留 ${stale.join(", ")}`);
+  js.includes(`Plus ${pkg2.version}`) ? ok("面板徽章为 Plus") : bad("面板徽章仍是社区版");
+  js.includes("社区版 1.7.20") ? bad("仍有 社区版 1.7.20 文案") : ok("无社区版版本文案");
+}
+
+console.log("[11] 演练台「凭据与文件」页");
+{
+  const files = ["lib/redteam/client.js", "client.js"];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(PKG, f), "utf8");
+    const comp = (src.match(/function ArtifactsTab/g) || []).length;
+    const tab = /artifacts['"], *['"]?凭据与文件/.test(src) || src.includes('["artifacts", "凭据与文件"]');
+    const disp = src.includes("st.tab === 'artifacts'") || src.includes('st.tab === "artifacts"');
+    comp === 1 && tab && disp ? ok(`${f}：组件 + 页签 + 分发 齐`) : bad(`${f}：组件 ${comp} / 页签 ${tab} / 分发 ${disp}`);
+  }
+  // 两个 op 必须有后端
+  const core = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
+  const hasCred = /op\s*===\s*['"]credentials['"]/.test(core);
+  const hasAccess = /op\s*===\s*['"]access['"]/.test(core);
+  hasCred && hasAccess ? ok("credentials / access 两个 op 后端存在") : bad("credentials 或 access 后端缺失");
+}
+
 console.log("");
 if (failed) { console.error(`验收失败：${failed} 项`); process.exit(1); }
 console.log("验收通过（本次全程只读，宿主未被修改）。");

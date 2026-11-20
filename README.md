@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
-当前版本 **1.7.20-plus.2** · 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
+当前版本 **1.7.20-plus.3** · 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
 
 </div>
 
@@ -54,7 +54,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 ```
 基座   dsh-purge-community 1.7.20   MIT         88 条宿主补丁 · 补丁引擎 · 运维层
 移植   dsh-purge-safe      2.0.0    Apache-2.0  能力面更宽的一条支线
-结果   dsh-purge-plus      1.7.20-plus.2        93 条补丁 · 8 组只读验收
+结果   dsh-purge-plus      1.7.20-plus.3        93 条补丁 · 11 组只读验收
 ```
 
 本仓库**不是** community 的 fork，也**不是** safe 的 fork。它把两个上游都当作只读输入：
@@ -79,7 +79,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 补丁引擎 | 30 个 schema 字段：`drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
 | 运维层 | 审计流水 `audit.jsonl`、跨进程维护锁、回滚事务、逐层自检、运行时探针、漂移检测 |
 | 在线升级 | 面板「检查更新」可用，匿名拉 GitHub 发行，逐字节核 `SHA256SUMS.txt` |
-| 演练台 | 左侧栏整页设置 + 红队事实库（SQLite） |
+| 演练台 | 左侧栏整页设置 + 红队事实库（SQLite），11 个页签 |
 
 ---
 
@@ -94,7 +94,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 补丁覆盖 | 88 条 | 59 条 | 以 community 为基 |
 | 运行时钩子 | 10 个事件 | **13 个事件** | 按需 |
 | 宿主写入提权 | 无 | **`ensureHostWritable` 四件套** | 已列入路线图 |
-| 演练台 | 10 tab | **12 tab + 6 分组** | 已列入路线图 |
+| 演练台 | 10 tab | 12 tab + 6 分组 | **11 tab**（已并入「凭据与文件」）；6 分组导航在路线图 |
 
 ### 为什么不整包用 safe
 
@@ -134,17 +134,17 @@ fork-and-edit 的第二次升级必死：上游一动，本地改动全变成冲
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 8 组只读验收，不动宿主
+node scripts/verify.mjs     # 11 组只读验收，不动宿主
 ```
 
-然后 DSH 面板 → **插件 → 从文件安装** → 选 `dist/dsh-purge-plus-1.7.20-plus.2.tgz` → 重启 DSH。
+然后 DSH 面板 → **插件 → 从文件安装** → 选 `dist/dsh-purge-plus-1.7.20-plus.3.tgz` → 重启 DSH。
 
 ### 方式二：命令行
 
 ```bash
 cd ~/.dsh/profiles/desktop
 pnpm remove dsh-purge-community
-pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-1.7.20-plus.2.tgz"
+pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-1.7.20-plus.3.tgz"
 ```
 
 装完确认 `package.json` 的 `dsh.profile.bundles` 里有 **`dsh-purge-plus`**，且 `node_modules/dsh-purge-plus/` 存在。
@@ -249,7 +249,7 @@ overlay/files/             新增文件
 overlay/edits.mjs          26 处精确锚点插入清单
 overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         8 组只读验收
+scripts/verify.mjs         11 组只读验收
 scripts/sync-upstream.sh   上游升级：换 vendor → 重放 → 重建 → 验收
 docs/PORT-MATRIX-V2.md     穷尽差分 + 逐条判定 + 11 处勘误
 docs/COMPAT.md             宿主兼容性验证报告
