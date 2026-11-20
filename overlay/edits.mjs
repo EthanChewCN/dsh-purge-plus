@@ -22,9 +22,9 @@ export function resolveRepo() {
   const env = process.env.GITHUB_REPO;
   if (env && env.includes("/")) {
     const [owner, repo] = env.split("/");
-    return { owner, repo };
+    return { owner, repo, revision: CFG.revision };
   }
-  return { owner: CFG.owner, repo: CFG.repo };
+  return { owner: CFG.owner, repo: CFG.repo, revision: CFG.revision };
 }
 
 /** 生成编辑清单。repo 变化只影响常量重指这几条。 */
@@ -275,6 +275,7 @@ export function buildEdits(repo = resolveRepo()) {
       find: "label: `dsh-purge Community ${version}`,",
       replace: "label: `dsh-purge-plus ${version}`, // [dsh-purge-plus]",
     },
+
   ];
 }
 

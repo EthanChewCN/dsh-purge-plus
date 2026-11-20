@@ -85,41 +85,75 @@ export const OVERLAY_PATCHES = [
     markers: ["[dsh-purge-plus] session telemetry otel off"],
   },
 
-  // ── 204 office-skills 资产回退 ────────────────────────────────────
-  // 来源 safe #96。锚点实测：dsh-skill-office/lib/index.js:59-60
-  // 语义：桌面 Host 读 SKILL.md 时若 assetRoot 下缺文件，回退到包内 assets，
-  //       不再 ENOENT 直接起不来。
+  // ── 205 Session Log 云端上传硬移除 ────────────────────────────────
+  // 来源 safe #52 的「硬移除」部分（Apache-2.0，署名见 NOTICE-PLUS.md）。
+  //
+  // 与 community #52 的分工，不重叠：
+  //   #52 SESSION_LOG_UPLOAD_DEFAULT_OFF  只把 config 默认值改成 false
+  //                                        → 配置被别处打开就又会传；
+  //   #205                                直接短路注册点，并让 prepare 首行返回
+  //                                        → 即使 enabled 被打开也产不出字段。
+  //
+  // 锚点实测（dsh-session-log-deepseek/lib/index.js，各恰好 1 次命中）：
+  //   :140  ctx.deepseekLlmApiExtensions.register("dsh_session_log", { prepare: (request) => {
+  //   :141  if (!config.enabled.get()) return void 0;
+  //
+  // 不用 `return;` 截断控制流：把 register 调用包进 `false && ...`，
+  // 整段表达式求值但不执行，语法完整、没有不可达声明。
   {
-    id: 204,
-    name: "SKILL_OFFICE_ASSET_FALLBACK",
+    id: 205,
+    name: "SESSION_LOG_CLOUD_UPLOAD_UNREGISTER",
     layer: "代码",
     layer_en: "Code",
-    desc: "office-skills 缺 SKILL.md 时回退包内 assets，桌面 Host 不再 ENOENT 起不来 / office-skills missing SKILL.md falls back to bundled assets",
-    file: ["skill-office"],
+    desc: "Session Log 云端上传整体移除：注册点短路 + prepare 首行返回，会话只落本地 / session log cloud upload removed at the registration site",
+    file: ["session-log-deepseek"],
     optional: true,
     skipIfMarked: true,
     replacements: [
-      // 宿主只 import 了 readFile，回退判定要 statSync，这里补一行。
-      {
-        pattern: 'import { readFile } from "node:fs/promises";',
-        replace:
-          'import { readFile } from "node:fs/promises";\nimport { statSync } from "node:fs"; // [dsh-purge-plus] office asset fallback',
-      },
       {
         pattern:
-          '\tconst assetRoot = config.assetRoot ?? fileURLToPath(new URL("../assets/", import.meta.url));\n' +
-          '\tif (!isAbsolute(assetRoot)) throw new Error("skill-office: assetRoot must be an absolute directory");',
+          '\t\tctx.deepseekLlmApiExtensions.register("dsh_session_log", { prepare: (request) => {',
         replace:
-          '\tconst __purgePlusBundledRoot = fileURLToPath(new URL("../assets/", import.meta.url));\n' +
-          "\tlet assetRoot = config.assetRoot ?? __purgePlusBundledRoot;\n" +
-          '\tif (!isAbsolute(assetRoot)) throw new Error("skill-office: assetRoot must be an absolute directory");\n' +
-          "\ttry {\n" +
-          '\t\tif (!statSync(assetRoot).isDirectory()) assetRoot = __purgePlusBundledRoot; // [dsh-purge-plus] office asset fallback (from safe #96)\n' +
-          "\t} catch {\n" +
-          "\t\tassetRoot = __purgePlusBundledRoot;\n" +
-          "\t}",
+          '\t\t/* [dsh-purge-plus] session log cloud upload removed */ false && ctx.deepseekLlmApiExtensions.register("dsh_session_log", { prepare: (request) => {',
+      },
+      {
+        pattern: "\t\t\tif (!config.enabled.get()) return void 0;",
+        replace:
+          "\t\t\treturn void 0; // [dsh-purge-plus] session log cloud upload removed (from safe #52)\n" +
+          "\t\t\tif (!config.enabled.get()) return void 0;",
       },
     ],
-    markers: ["[dsh-purge-plus] office asset fallback"],
+    markers: ["[dsh-purge-plus] session log cloud upload removed"],
+  },
+
+  // ── 206 子代理继承父会话的权限档 ──────────────────────────────────
+  // 来源 safe #92 的第三、四条替换（后半），署名见 NOTICE-PLUS.md。
+  //
+  // 为什么只取这一半：
+  //   safe #92 的前半（在子会话 spawn 时立刻 prepareAssemble）与本仓库的
+  //   community #74 ASSEMBLE_BEFORE_PRESTEP 重叠 —— #74 在 agent-loop 层覆盖
+  //   所有 agent（含子代理），另有 400ms 轮询兜底，再挂一层是重复实现。
+  //
+  // 真缺口在这一行：宿主只把 auto / danger-full-access 两种档位传给子会话，
+  // 其余档位一律 undefined → 子会话回落到部署默认。
+  // 锚点实测：dsh-subagent/lib/index.js:358（恰好 1 次命中）
+  {
+    id: 206,
+    name: "SUBAGENT_INHERIT_PARENT_ACCESS",
+    layer: "代码",
+    layer_en: "Code",
+    desc: "子代理原样继承父会话的权限档，不再只认 auto / danger-full-access / subagent inherits the parent permission preset verbatim",
+    file: ["subagent"],
+    optional: true,
+    skipIfMarked: true,
+    replacements: [
+      {
+        pattern:
+          '\t\tpermissionPreset: preset === "auto" || preset === "danger-full-access" ? preset : void 0,',
+        replace:
+          '\t\tpermissionPreset: preset || "danger-full-access", // [dsh-purge-plus] subagent inherits parent access (from safe #92)',
+      },
+    ],
+    markers: ["[dsh-purge-plus] subagent inherits parent access"],
   },
 ];

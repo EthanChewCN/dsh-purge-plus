@@ -1,0 +1,37 @@
+{
+  "name": "dsh-profile-desktop",
+  "private": true,
+  "dependencies": {
+    "@deepseek-ai/dsh-subagent-claude-code": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-subagent-codex": "0.2.2-rc.5",
+    "@dhicoc/dsh-reverse-skill": "github:dhicoc/dsh-reverse-skill",
+    "dsh-breeze-voice": "github:kingcharleslzy-ai/dsh-breeze-voice#45b1ac48d50ffe286460a0882f4e7f7b3895af77",
+    "dsh-h3-video": "github:kingcharleslzy-ai/dsh-h3-video#d155c10b559e27be6eef76a8827612ba8d6d4a13",
+    "dsh-plugin-mobile-gateway": "0.12.2",
+    "dsh-purge-community": "file:/Users/wheming/.dsh/dsh-purge-community/pkgs/5b3d66e804ea0b1cf6ef01035a292755ab9fea771b8f5338000954075dd6b45a/dsh-purge-community-1.7.20.tgz",
+    "dsh-qwen-studio": "file:/Users/wheming/Downloads/dsh-qwen-studio-3.1.3.tgz",
+    "graph-memory": "github:adoresever/graph-memory#v1.6.0-beta.17"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "graph-memory",
+        "@deepseek-ai/dsh-experimental-plugin-market-bundle",
+        "@deepseek-ai/dsh-experimental-cot-translation-bundle",
+        "@deepseek-ai/dsh-experimental-session-search",
+        "@deepseek-ai/dsh-experimental-ralph-bundle",
+        "@dhicoc/dsh-reverse-skill",
+        "@deepseek-ai/dsh-experimental-forge-bundle",
+        "dsh-qwen-studio",
+        "dsh-breeze-voice",
+        "dsh-h3-video",
+        "dsh-purge-community",
+        "dsh-plugin-mobile-gateway",
+        "@deepseek-ai/dsh-subagent-codex",
+        "@deepseek-ai/dsh-subagent-claude-code"
+      ]
+    }
+  }
+}

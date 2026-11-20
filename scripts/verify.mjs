@@ -2,9 +2,9 @@
 // [dsh-purge-plus] 验收：只读地证明构建物可用，不写宿主、不改任何文件。
 //
 //   1. 包能 import（补丁表 / 围栏 / 入口）
-//   2. 补丁表不变式：92 条、自有 4 条 ≥201、id 无重复
+//   2. 补丁表不变式：93 条、自有 5 条 ≥201、id 无重复
 //   3. 真实宿主上 --status 能定位 @deepseek-ai 根（DSH_SURFACE=desktop）
-//   4. 自有 4 条出现在状态里（pending/applied/drifted 均可，不能消失）
+//   4. 自有 5 条出现在状态里（pending/applied/drifted 均可，不能消失）
 //   5. 锚点预演：每个自有补丁的 pattern 在宿主文件里的命中次数
 //      —— 命中 0 次 = 宿主升级后锚点烂了，必须重写；命中 ≥2 次 = 会打歪。
 
@@ -53,8 +53,8 @@ try {
 
 // ── 2. 不变式 ───────────────────────────────────────────────────
 console.log("[2] 补丁表不变式");
-r.total === 92 ? ok(`总数 ${r.total}`) : bad(`总数应为 92，实际 ${r.total}`);
-r.ours.length === 4 ? ok(`自有 ${r.ours.length} 条（≥201）`) : bad(`自有应为 4，实际 ${r.ours.length}`);
+r.total === 93 ? ok(`总数 ${r.total}`) : bad(`总数应为 93，实际 ${r.total}`);
+r.ours.length === 5 ? ok(`自有 ${r.ours.length} 条（≥201）`) : bad(`自有应为 5，实际 ${r.ours.length}`);
 r.dup.length === 0 ? ok("id 无重复") : bad(`id 重复: ${r.dup}`);
 r.fence === "function" ? ok("installSubagentFence 已导出") : bad(`围栏导出类型 ${r.fence}`);
 
@@ -210,6 +210,17 @@ console.log("[7] 在线更新通道");
     ? ok("installed-package 认 dsh-purge-plus") : bad("installed-package 仍只认 community");
   pkgJson.repository?.url?.includes(slug) ? ok(`package.json repository = ${slug}`)
     : bad(`package.json repository = ${pkgJson.repository?.url}`);
+}
+
+console.log("[8] cordis.patch.yml 插件名");
+{
+  const yml = fs.readFileSync(path.join(PKG, "cordis.patch.yml"), "utf8");
+  const name = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")).name;
+  const hits = yml.split(name).length - 1;
+  hits >= 5 ? ok(`插件名 ${name} 出现 ${hits} 处`) : bad(`插件名 ${name} 只出现 ${hits} 处（应为 5）`);
+  // 上游基座包名一旦残留，宿主会 MODULE_NOT_FOUND 并静默跳过整个 bundle。
+  const stray = (yml.match(/name:\s*['"]?dsh-purge-community/g) || []).length;
+  stray === 0 ? ok("无上游包名残留") : bad(`仍有 ${stray} 处上游包名`);
 }
 
 console.log("");

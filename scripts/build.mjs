@@ -26,7 +26,7 @@ const basePkg = JSON.parse(fs.readFileSync(path.join(VENDOR, "package.json"), "u
 const baseVersion = basePkg.version;
 const repo = resolveRepo();
 const REPO_SLUG = `${repo.owner}/${repo.repo}`;
-const plusRev = Number(process.env.PLUS_REV || basePkg.plus?.revision || 1);
+const plusRev = Number(process.env.PLUS_REV || repo.revision || basePkg.plus?.revision || 1);
 const version = `${baseVersion}-plus.${plusRev}`;
 
 log(`上游基座  ${basePkg.name}@${baseVersion}`);
@@ -121,6 +121,23 @@ for (const extra of ["NOTICE-PLUS.md", "NOTICE-SAFE.txt", "LICENSE-SAFE-APACHE-2
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 log(`✓ package.json 重写：${pkg.name}@${pkg.version}  dshTarget=${pkg.dshTarget}`);
 
+// ── 4b. 重写 cordis.patch.yml 里的插件名 ────────────────────────────
+// 宿主的 cordis.patch.yml 用 `name:` 声明要加载哪个包，然后走
+// createRequire(profile).resolve(name) 去解析。上游 community 的包名是
+// basePkg.name，本仓库改名后如果这里不改，宿主会 MODULE_NOT_FOUND
+// 并**静默跳过整个 bundle** —— 面板上看起来装了，实际一条补丁都不打。
+{
+  const ymlPath = path.join(PKG, "cordis.patch.yml");
+  const baseName = basePkg.name;
+  if (fs.existsSync(ymlPath) && baseName && baseName !== pkg.name) {
+    const yml = fs.readFileSync(ymlPath, "utf8");
+    const hits = yml.split(baseName).length - 1;
+    if (hits === 0) die(`cordis.patch.yml 里找不到 ${baseName}，插件名重写无法进行`);
+    fs.writeFileSync(ymlPath, yml.split(baseName).join(pkg.name));
+    log(`✓ cordis.patch.yml 插件名 ${baseName} → ${pkg.name}（${hits} 处）`);
+  }
+}
+
 // ── 5. 语法与补丁表自检 ───────────────────────────────────────────
 const probe = `
 import { ALL_PATCHES } from "./lib/patches/index.mjs";
@@ -138,8 +155,8 @@ try {
 }
 const r = JSON.parse(probeOut);
 if (r.dup.length) die(`补丁 id 重复: ${r.dup.join(",")}`);
-if (r.ours !== 4) die(`自有补丁数应为 4，实际 ${r.ours}`);
-if (r.total !== 88 + 4) die(`补丁总数应为 92，实际 ${r.total}`);
+if (r.ours !== 5) die(`自有补丁数应为 5，实际 ${r.ours}`);
+if (r.total !== 88 + 5) die(`补丁总数应为 93，实际 ${r.total}`);
 if (r.upstreamMax !== 96) die(`上游补丁最大 id 应为 96，实际 ${r.upstreamMax}（基座可能变了，需复核 PORT-MATRIX）`);
 log(`✓ 补丁表 ${r.total} 条（上游 ${r.total - r.ours}，最大 id ${r.upstreamMax} + 自有 ${r.ours} 条 ≥201），id 无重复`);
 
