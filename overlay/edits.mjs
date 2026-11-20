@@ -210,6 +210,43 @@ export function buildEdits(repo = resolveRepo()) {
       replace:
         "const FORK_RELEASE_RE = /^v\\d+\\.\\d+\\.\\d+(?:-plus\\.\\d+)?$/; // [dsh-purge-plus] 认 -plus.N 后缀",
     },
+    // 版本号换轨（0.1.N）之后，历史 `1.7.20-plus.N` 的 tag 在**数字序**上反而更高
+    // （1.7.20-plus.4 > 0.1.37）。混在同一张表里比较，面板会把「旧版本」当成
+    // 「有更新」推给用户——实测 checkUpdate 返回 remoteVersion=1.7.20-plus.4。
+    // 规则：本包版本不带 `-plus.` 时，列表里也不收带 `-plus.` 的 tag。
+    // 不写死 1.7.20：换轨后的下一个方案照样适用。
+    {
+      file: "lib/update.js",
+      required: true,
+      find: "const FORK_CACHE_TTL = 60_000;",
+      replace:
+        "// [dsh-purge-plus] 旧版本号方案（`<基座>-plus.N`）的 tag 不参与版本比较。\n" +
+        "const LEGACY_TAG_RE = /-plus\\.\\d+$/;\n" +
+        "const tagAllowed = (ref, local = localVersion()) =>\n" +
+        "  FORK_RELEASE_RE.test(ref) && (!LEGACY_TAG_RE.test(ref) || LEGACY_TAG_RE.test(local));\n\n" +
+        "const FORK_CACHE_TTL = 60_000;",
+    },
+    {
+      file: "lib/update.js",
+      required: true,
+      find: "rows.map(forkReleaseItem).filter((item) => FORK_RELEASE_RE.test(item.ref))",
+      replace: "rows.map(forkReleaseItem).filter((item) => tagAllowed(item.ref))",
+    },
+    {
+      file: "lib/update.js",
+      required: true,
+      find: "  if (!FORK_RELEASE_RE.test(ref)) return null;",
+      replace: "  if (!tagAllowed(ref)) return null;",
+    },
+    {
+      file: "lib/update.js",
+      required: true,
+      find:
+        "        warning: UPSTREAM_WARNING,\n      };\n    })\n    .filter(Boolean);\n}",
+      replace:
+        "        warning: UPSTREAM_WARNING,\n      };\n    })\n    .filter(Boolean)\n" +
+        "    .filter((item) => tagAllowed(item.ref)); // [dsh-purge-plus] 旧方案的 tag 不再参与比较\n}",
+    },
     // 同一道闸门在 community.js 里还有两处**内联**正则：一处过滤发行列表，
     // 一处是安装前的 ref 校验。只放宽 update.js 的 FORK_RELEASE_RE 是不够的——
     // 列表能过，但点「安装」会抛「只安装正式发布版本」。

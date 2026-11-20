@@ -128,12 +128,11 @@ node scripts/build.mjs && node scripts/verify.mjs
 
 ## 6. 已发布记录
 
-| tag | 资产 | sha256 | 状态 |
-|---|---|---|---|
-| `v1.7.20-plus.1` | `dsh-purge-plus-1.7.20-plus.1.tgz` + `SHA256SUMS.txt` | 见 release 页的 `SHA256SUMS.txt` | 正式发行，匿名可读 |
+发行清单以 **[Releases 页](https://github.com/EthanChewCN/dsh-purge-plus/releases)** 为准。
 
-> sha256 不写进本文件：本文件随包分发，写死摘要会让「改文档 → 改包 → 改摘要 → 又改文档」
-> 形成自指循环。以 release 页的 `SHA256SUMS.txt` 为准。
+> 这里**不维护 tag / sha256 表格**：本文件随包分发，写死摘要会让
+> 「改文档 → 改包 → 改摘要 → 又改文档」形成自指循环，写死 tag 列表则每发一版
+> 都要再改一次文档、再打一个版本号。以 release 页的 `SHA256SUMS.txt` 为准。
 
 ### 发布后实测（不是推测）
 

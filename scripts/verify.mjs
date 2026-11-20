@@ -207,6 +207,20 @@ console.log("[7] 在线更新通道");
     && !vs.versionIsNewer("0.1.37", "0.1.37");
   okNewer ? ok("版本比较：0.1.N 递增 / 数字序 / 历史 plus tag / 同版不更新") : bad("versionIsNewer 版本判定错误");
 
+  // 换轨后旧方案的 tag 不能参与比较：数字序上 1.7.20-plus.4 > 0.1.38，
+  // 混进来面板就会把**旧版本**当成「有更新」推给用户（实测过一次）。
+  // 用注入的假发行列表做行为断言，不联网。
+  const updMod = await import(path.join(PKG, "lib", "update.js"));
+  const fakeRows = [
+    { ref: "v1.7.20-plus.4", version: "1.7.20-plus.4", url: "u", asset: "a", sums: "s" },
+    { ref: `v${pkgJson.version}`, version: pkgJson.version, url: "u2", asset: "a2", sums: "s2" },
+  ];
+  const listed = await updMod.listForkReleases({ fresh: true, services: { releases: async () => fakeRows } });
+  const refs = listed.rows.map((r) => r.ref);
+  refs.includes(`v${pkgJson.version}`) && !refs.includes("v1.7.20-plus.4")
+    ? ok("旧方案 tag 已被排除出更新比较")
+    : bad(`旧方案 tag 仍在比较里：${refs.join(", ")}`);
+
   // 已安装包身份校验要认得本包名。
   read("lib/installed-package.js").includes("COMMUNITY_PACKAGE = 'dsh-purge-plus'")
     ? ok("installed-package 认 dsh-purge-plus") : bad("installed-package 仍只认 community");
