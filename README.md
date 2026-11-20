@@ -67,7 +67,7 @@ docs/RELEASE.md       发布流程：让面板「检查更新」能用
 ## 维护模型
 
 **不做 fork-and-edit。** `vendor/` 永远是上游原样，本仓库的改动全部是
-「新增文件 + 精确锚点插入」，共 19 处。升级时整目录替换 `vendor/community`，
+「新增文件 + 精确锚点插入」，共 26 处。升级时整目录替换 `vendor/community`，
 锚点对不上就**构建硬失败**，而不是静默产出一个语义跑偏的包。
 
 ```bash
@@ -85,15 +85,25 @@ docs/RELEASE.md       发布流程：让面板「检查更新」能用
 | `REPOSITORY` → 本仓库 | `lib/community.js` |
 | `SOURCE_REPO` → 本仓库 | `lib/update-net.js` |
 | 发行 tag 白名单接受 `-plus.N` | `lib/update.js` `FORK_RELEASE_RE` |
+| 同一道闸门的**两处内联正则** | `lib/community.js`（列表过滤 + 安装前 `prepareRelease` 校验） |
+| 历史条目按当前 releases 过滤 | `lib/update.js`（否则列出装不动的旧版本） |
 | 已安装包身份认 `dsh-purge-plus` | `lib/installed-package.js` |
 | 升级前直链识别 | `lib/community.js` 的 `fromLatest` 正则 |
 | 回滚允许的依赖名 | `lib/rollback-transaction.js` |
+
+**为什么「两处内联正则」单列**：只放宽 `update.js` 的 `FORK_RELEASE_RE` 时，
+发行列表能列出来，但点「安装」会抛「只安装正式发布版本」——因为 `community.js`
+里还有两个硬编码的 `/^v\d+\.\d+\.\d+$/`。这是实测踩到的，不是推测。
 
 发布约定（tag `v<version>` + 资产 `dsh-purge-plus-<version>.tgz` + `SHA256SUMS.txt`）
 和排错表见 **[docs/RELEASE.md](docs/RELEASE.md)**。
 
 `node scripts/verify.mjs` 的第 [7] 段就是这条链路的自检：
-tag 白名单、资产名、版本比较、旧仓库残留，全部逐项验。
+tag 白名单、两处内联正则、历史过滤、资产名、版本比较、上游坐标残留，全部逐项验。
+
+发布状态：`v1.7.20-plus.1` 已发布，资产含 tgz + `SHA256SUMS.txt`。
+实测（本地版本临时降为 `1.7.20-plus.0`）：`checkUpdate()` 返回
+`hasUpdate: true`、`remoteVersion: 1.7.20-plus.1`、`updateTarget: releases`。
 
 ## 许可
 

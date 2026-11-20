@@ -16,6 +16,17 @@
 其中第 1 条本仓库已放宽到认 `-plus.N` 后缀（见 `overlay/edits.mjs` 的 `FORK_RELEASE_RE` 那条）。
 上游只认 `vX.Y.Z`，不放宽的话我们自己的 tag 会被 `filter()` 全过滤掉。
 
+**但只放宽这一处不够。** `lib/community.js` 里还有两个**内联**的
+`/^v\d+\.\d+\.\d+$/`：
+
+| 位置 | 作用 | 不放宽的后果 |
+|---|---|---|
+| `releasedVersions()` 的 `.filter()` | 过滤发行列表 | 列表为空 |
+| `prepareRelease()` 开头 | 安装前校验 `release.ref` | 列表能看见，点安装抛「只安装正式发布版本」 |
+
+两处都已由 `overlay/edits.mjs` 放宽，`scripts/verify.mjs` 第 [7] 段会数
+`(?:-plus\.\d+)?` 出现次数，必须恰好 2。
+
 另外两条隐含约定：
 
 - **默认分支必须是 `master`**。`lib/update-net.js` 的 `STABLE_REF = "master"`，
@@ -112,3 +123,23 @@ PLUS_REV=1 node scripts/build.mjs && node scripts/verify.mjs
 | 「校验失败」 | `SHA256SUMS.txt` 缺失或没列这个文件 | release 页面 |
 | 「未找到已安装的…」 | profile 里装的是 `dsh-purge-community`，不是 plus | `lib/installed-package.js`（已兼容两种包名） |
 | beta 通道 404 | 默认分支不是 `master` | 仓库 Settings → Branches |
+
+## 6. 已发布记录
+
+| tag | 资产 | sha256 | 状态 |
+|---|---|---|---|
+| `v1.7.20-plus.1` | `dsh-purge-plus-1.7.20-plus.1.tgz` + `SHA256SUMS.txt` | `60254f52…f2abd4` | 正式发行，匿名可读 |
+
+### 发布后实测（不是推测）
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| 匿名读 release 列表 | `GET /repos/{owner}/{repo}/releases` | 200 |
+| 匿名读 latest | `GET /repos/{owner}/{repo}/releases/latest` | 200，`prerelease:false` `draft:false` |
+| 匿名下载资产 | `curl -L .../download/v1.7.20-plus.1/...tgz` | 200，2316239 B |
+| 校验和比对 | `shasum -a 256 -c SHA256SUMS.txt` | OK，与本地构建产物一致 |
+| 插件自己的列表函数 | `listForkReleases({fresh:true})` | 1 条，`asset`/`sums` URL 均指向本仓库 |
+| 面板同款检查 | `checkUpdate({})` | `hasUpdate:false`（本地已是最新） |
+| **降级模拟** | 本地版本临时改 `1.7.20-plus.0` 后 `checkUpdate({})` | **`hasUpdate:true`，`remoteVersion:1.7.20-plus.1`，`updateTarget:releases`** |
+
+最后一行是「面板点升级能不能用」的直接证据：远端高一版时更新器确实报出更新。
