@@ -43,6 +43,21 @@ log(`✓ vendor/community → dist/build/package（${countFiles(PKG)} 个文件�
 fs.cpSync(OVERLAY_FILES, PKG, { recursive: true });
 log(`✓ overlay/files 覆盖完成`);
 
+// 包内 README 用本仓库的：vendor 带的是 community 的 README，装完在面板里
+// 看到的会是「dsh-purge Community」，用户会以为装的是别人的包。
+fs.copyFileSync(path.join(ROOT, "README.md"), path.join(PKG, "README.md"));
+log(`✓ README.md 用本仓库版本覆盖`);
+
+// 本仓库的维护文档一并随包分发（与 vendor 的 docs 无重名）：
+// PORT-MATRIX 是移植判定，LICENSING 是 Apache-2.0 §4 要求的改动记录。
+for (const f of fs.readdirSync(path.join(ROOT, "docs"))) {
+  if (!f.endsWith(".md")) continue;
+  const dst = path.join(PKG, "docs", f);
+  if (fs.existsSync(dst)) die(`docs/${f} 与 vendor 同名，拒绝覆盖上游文档`);
+  fs.copyFileSync(path.join(ROOT, "docs", f), dst);
+}
+log(`✓ 本仓库 docs 并入（${fs.readdirSync(path.join(ROOT, "docs")).filter((f) => f.endsWith(".md")).length} 个）`);
+
 // ── 3. 应用精确锚点编辑 ───────────────────────────────────────────
 const EDITS = buildEdits(repo);
 let applied = 0, warned = 0;
