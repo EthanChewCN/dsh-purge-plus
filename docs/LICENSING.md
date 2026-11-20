@@ -45,7 +45,7 @@ vendor/community/test/fixtures/agent-loop-022-LICENSE MIT
 当前有 5 处，其中 2 处是**修正 safe 的缺陷**，不是风格偏好：
 
 - `#202`：safe 用 `return;` 提前返回 → 跳过 `ctx.effect(shutdown)` 注册
-- `#204`：safe 用了宿主里不存在的 `statSync` → 打上即 `ReferenceError`
+- ~~`#204`~~（已回退）：safe 的 `#96` 用了宿主里不存在的 `statSync` → 打上即 `ReferenceError`；rc.5 宿主已自愈，该补丁零收益
 
 ## 4. 不得做的事
 
