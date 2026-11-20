@@ -128,7 +128,10 @@ PLUS_REV=1 node scripts/build.mjs && node scripts/verify.mjs
 
 | tag | 资产 | sha256 | 状态 |
 |---|---|---|---|
-| `v1.7.20-plus.1` | `dsh-purge-plus-1.7.20-plus.1.tgz` + `SHA256SUMS.txt` | `fa2234c6…00bf7` | 正式发行，匿名可读 |
+| `v1.7.20-plus.1` | `dsh-purge-plus-1.7.20-plus.1.tgz` + `SHA256SUMS.txt` | 见 release 页的 `SHA256SUMS.txt` | 正式发行，匿名可读 |
+
+> sha256 不写进本文件：本文件随包分发，写死摘要会让「改文档 → 改包 → 改摘要 → 又改文档」
+> 形成自指循环。以 release 页的 `SHA256SUMS.txt` 为准。
 
 ### 发布后实测（不是推测）
 
