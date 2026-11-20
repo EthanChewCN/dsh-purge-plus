@@ -1,0 +1,43 @@
+.rt-r2{padding-bottom:24px}
+/* 报告页是「一整篇文档」，必须自己滚。父级 .rt-main 是 overflow:hidden（为其它页签
+   的固定布局设计的），不给这里加 overflow:auto 的话，文档视图里超出视口的全部内容
+   都点不到 —— 实测 clientHeight 371 / scrollHeight 1784，「继续加载」按钮永远在框外。 */
+.rt-main.rt-r2{overflow:auto}
+.rt-r2-bar{flex-wrap:wrap;gap:6px;position:sticky;top:0;z-index:2;background:var(--dsw-alias-bg-l1);padding:6px 0}
+.rt-r2-sec{margin:14px 0 4px}
+.rt-r2-h4{margin:0 0 8px;font-size:14px;font-weight:600;letter-spacing:.02em}
+.rt-r2-subhead{margin:10px 0 6px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}
+.rt-r2-proofs{display:flex;flex-direction:column;gap:6px}
+.rt-r2-proof{border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:8px 10px}
+.rt-r2-ip{font-weight:600}
+.rt-r2-strong{color:#10b981;border-color:#10b981}
+.rt-r2-weak{color:#f59e0b;border-color:#f59e0b}
+.rt-r2-ev{margin-top:6px;display:flex;flex-direction:column;gap:2px}
+.rt-r2-evline{display:flex;gap:8px;font-size:11.5px;line-height:1.5}
+.rt-r2-evkind{flex:0 0 84px;color:var(--dsw-alias-label-secondary)}
+.rt-r2-table{width:100%;border-collapse:collapse;font-size:11.5px;margin:4px 0 8px}
+.rt-r2-table th,.rt-r2-table td{border-bottom:1px solid var(--dsw-alias-border-l1);padding:4px 6px;text-align:left;vertical-align:top}
+.rt-r2-table th{font-weight:600;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.rt-r2-total td{font-weight:600;border-top:2px solid var(--dsw-alias-border-l1)}
+.rt-r2-td-ev{max-width:420px;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary)}
+.rt-r2-sub{margin:10px 0}
+.rt-r2-list{display:flex;flex-direction:column;gap:8px}
+.rt-r2-repro{border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:10px 12px}
+.rt-r2-repro-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rt-r2-no{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:11px;background:var(--dsw-alias-bg-l2);font-size:11px;font-weight:600}
+.rt-r2-name{font-weight:600}
+.rt-r2-target{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.rt-r2-evidence{margin-top:6px;font-size:12px;line-height:1.6}
+.rt-r2-cmd,.rt-r2-http,.rt-r2-shots,.rt-r2-files{margin-top:8px}
+.rt-r2-cmd-head{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary);margin-bottom:4px}
+.rt-r2-pre{margin:0 0 6px;max-height:240px;overflow:auto;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all;background:var(--dsw-alias-bg-l2);padding:8px;border-radius:4px}
+.rt-r2-pre-dim{opacity:.72;max-height:160px}
+.rt-r2-gap{color:#f59e0b;font-size:11.5px;line-height:1.6}
+.rt-r2-gaps{margin-top:8px;display:flex;flex-direction:column;gap:2px}
+.rt-r2-shots{display:flex;gap:8px;flex-wrap:wrap}
+.rt-r2-shot{display:flex;flex-direction:column;gap:2px;max-width:220px}
+.rt-r2-shot img{max-width:220px;max-height:150px;object-fit:contain;border-radius:4px;border:1px solid var(--dsw-alias-border-l1)}
+.rt-r2-seg{margin:8px 0}
+.rt-r2-seghead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.rt-r2-clean-sum{margin-bottom:6px;font-size:11.5px}
+.rt-r2-fallback{display:flex;flex-direction:column;gap:6px}

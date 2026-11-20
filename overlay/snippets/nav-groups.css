@@ -1,0 +1,12 @@
+/* [dsh-purge-plus] P4 一级分组。面板常驻右侧栏（默认宽约 420px，可拖宽），safe 那种左侧
+   竖排导航会吃掉一成多的内容宽度，所以这里用横向 chips：一级一行，组内多页时
+   下面再出一行二级页签（复用 .rt-tabs/.rt-tab，视觉与原来一致）。 */
+.rt-groups{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px 0}
+.rt-group{padding:4px 9px;border-radius:999px;cursor:pointer;font-size:12px;font-family:inherit;
+  border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);
+  display:inline-flex;align-items:center;gap:5px}
+.rt-group:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2)}
+.rt-group.on{background:color-mix(in srgb,var(--dsw-alias-brand-primary,#6dbf8c) 16%,transparent);
+  border-color:color-mix(in srgb,var(--dsw-alias-brand-primary,#6dbf8c) 45%,transparent);
+  color:var(--dsw-alias-label-primary);font-weight:600}
+.rt-group:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#6dbf8c);outline-offset:1px}

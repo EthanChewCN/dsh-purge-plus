@@ -9,12 +9,13 @@
 
 | # | 约定 | 值 | 读它的代码 |
 |---|---|---|---|
-| 1 | **发行 tag** | `v<version>`，如 `v1.7.20-plus.1` | `lib/update.js` `FORK_RELEASE_RE` |
+| 1 | **发行 tag** | `v<version>`，如 `v0.1.37` | `lib/update.js` `FORK_RELEASE_RE` |
 | 2 | **资产文件名** | `dsh-purge-plus-<version>.tgz` | `lib/update.js` `${PACKAGE}-${version}.tgz` |
 | 3 | **校验和文件** | `SHA256SUMS.txt`，同一 release 下 | `lib/update.js` `verifyAtomRelease` |
 
-其中第 1 条本仓库已放宽到认 `-plus.N` 后缀（见 `overlay/edits.mjs` 的 `FORK_RELEASE_RE` 那条）。
-上游只认 `vX.Y.Z`，不放宽的话我们自己的 tag 会被 `filter()` 全过滤掉。
+本仓库版本是 `0.1.N`，`vX.Y.Z` 本来就匹配；`-plus.N` 分支保留是为了让
+历史发行（`v1.7.20-plus.N`）仍能被解析（见 `overlay/edits.mjs` 的 `FORK_RELEASE_RE` 那条）。
+上游只认 `vX.Y.Z`，不放宽的话历史 tag 会被 `filter()` 全过滤掉。
 
 **但只放宽这一处不够。** `lib/community.js` 里还有两个**内联**的
 `/^v\d+\.\d+\.\d+$/`：
@@ -40,27 +41,27 @@
 ```bash
 cd ~/Documents/dsh-purge-plus
 
-# 1) 构建（PLUS_REV 递增，或在 package.json.plus.revision 里改）
-PLUS_REV=2 node scripts/build.mjs
+# 1) 构建（修订号在 overlay/repo.json 的 revision 里改）
+node scripts/build.mjs
 
 # 2) 验收（7 组，全绿才发）
 node scripts/verify.mjs
 
 # 3) 生成校验和
 cd dist
-shasum -a 256 dsh-purge-plus-1.7.20-plus.2.tgz > SHA256SUMS.txt
+shasum -a 256 dsh-purge-plus-0.1.37.tgz > SHA256SUMS.txt
 cd ..
 
 # 4) 打 tag 并推
-git add -A && git commit -m "release: 1.7.20-plus.2"
-git tag -a v1.7.20-plus.2 -m "dsh-purge-plus 1.7.20-plus.2"
+git add -A && git commit -m "release: 0.1.37"
+git tag -a v0.1.37 -m "dsh-purge-plus 0.1.37"
 git push origin master --tags
 
 # 5) 建 release（资产名必须与 tag 版本一致）
-gh release create v1.7.20-plus.2 \
-  "dist/dsh-purge-plus-1.7.20-plus.2.tgz" \
+gh release create v0.1.37 \
+  "dist/dsh-purge-plus-0.1.37.tgz" \
   "dist/SHA256SUMS.txt" \
-  --title "1.7.20-plus.2" \
+  --title "0.1.37" \
   --notes "见 CHANGELOG"
 ```
 
@@ -82,9 +83,9 @@ gh release create v1.7.20-plus.2 \
 `versionIsNewer` 的排序（`lib/update-state.js`）：
 
 ```
-1.7.20-plus.2  >  1.7.20-plus.1     ← plus.N 递增
-1.7.21         >  1.7.20-plus.9     ← 上游大版本压过任何 plus 小版本
-1.7.20         >  1.7.20-plus.1     ← 正式版压过预发布（理论上不会出现）
+0.1.37  >  0.1.36            ← 修订号递增
+0.1.10  >  0.1.9             ← 按数字比，不是按字符串
+1.7.20-plus.36  >  0.1.37    ← 历史 plus 版本号在数字序上更高（迁移期只能手工装一次）
 ```
 
 ## 4. 未认证 API 的配额
@@ -106,13 +107,14 @@ node scripts/build.mjs
 #    ✗ #8 lib/community.js: 锚点命中 0 次（要求恰好 1 次）
 #      → 上游改了 REPOSITORY 的写法，去 overlay/edits.mjs 更新那条 find
 
-# 3) 验收 + 发布（PLUS_REV 归 1，版本随基座走）
-PLUS_REV=1 node scripts/build.mjs && node scripts/verify.mjs
+# 3) 验收 + 发布
+node scripts/build.mjs && node scripts/verify.mjs
 ```
 
-版本号规则：**基座版本 + `-plus.<overlay 修订号>`**。
-基座升到 1.7.21 时，本仓库版本变 `1.7.21-plus.1`（不是 `1.7.20-plus.99`）。
-这样 `versionIsNewer` 能正确判出「基座升级是大版本更新」。
+版本号规则：**`0.1.<overlay 修订号>`**，与基座版本解耦。
+上游升到 1.7.21 时本包仍是 `0.1.N`（基座版本记进 `package.json` 的 `plus.base` 做溯源）。
+理由：本包的版本号应该回答「我们改了什么」，而不是复述上游版本 ——
+否则上游一动，面板、徽章、页脚、发行资产名全都要跟着改一遍。
 
 ## 6. 排错
 

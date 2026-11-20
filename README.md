@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
-当前版本 **1.7.20-plus.3** · 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
+当前版本 **0.1.37** · 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
 
 </div>
 
@@ -52,9 +52,9 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 ## 三条设计线
 
 ```
-基座   dsh-purge-community 1.7.20   MIT         88 条宿主补丁 · 补丁引擎 · 运维层
-移植   dsh-purge-safe      2.0.0    Apache-2.0  能力面更宽的一条支线
-结果   dsh-purge-plus      1.7.20-plus.3        93 条补丁 · 11 组只读验收
+基座   dsh-purge Community   MIT         宿主补丁 · 补丁引擎 · 运维层
+移植   dsh-purge safe        Apache-2.0  能力面更宽的一条支线
+结果   dsh-purge-plus        独立变体     93 条补丁 · 11 组只读验收
 ```
 
 本仓库**不是** community 的 fork，也**不是** safe 的 fork。它把两个上游都当作只读输入：
@@ -84,6 +84,8 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 ---
 
 ## 与两个上游的关系
+
+**基于 dsh-purge Community + dsh-purge safe 独立维护。** 两个上游都当只读输入，不跟随任何一方的版本号。
 
 | 维度 | dsh-purge-community | dsh-purge-safe | 本仓库 |
 | :--- | :--- | :--- | :--- |
@@ -137,14 +139,14 @@ node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
 node scripts/verify.mjs     # 11 组只读验收，不动宿主
 ```
 
-然后 DSH 面板 → **插件 → 从文件安装** → 选 `dist/dsh-purge-plus-1.7.20-plus.3.tgz` → 重启 DSH。
+然后 DSH 面板 → **插件 → 从文件安装** → 选 `dist/dsh-purge-plus-<ver>.tgz` → 重启 DSH。
 
 ### 方式二：命令行
 
 ```bash
 cd ~/.dsh/profiles/desktop
 pnpm remove dsh-purge-community
-pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-1.7.20-plus.3.tgz"
+pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-<ver>.tgz"
 ```
 
 装完确认 `package.json` 的 `dsh.profile.bundles` 里有 **`dsh-purge-plus`**，且 `node_modules/dsh-purge-plus/` 存在。
@@ -266,8 +268,8 @@ docs/RELEASE.md            发布流程与排错
 
 | 来源 | 许可 | 义务 |
 | :--- | :--- | :--- |
-| `vendor/community/` · dsh-purge-community 1.7.20 | MIT | 保留版权 + 许可全文 + NOTICE |
-| `vendor/safe/` · dsh-purge-safe 2.0.0 | Apache-2.0 | 保留许可 + NOTICE + **逐文件标注改动** + 不暗示背书 |
+| `vendor/community/` · dsh-purge Community（当前 vendor 快照） | MIT | 保留版权 + 许可全文 + NOTICE |
+| `vendor/safe/` · dsh-purge safe（当前 vendor 快照） | Apache-2.0 | 保留许可 + NOTICE + **逐文件标注改动** + 不暗示背书 |
 | redteam 模块 | MIT | 保留版权声明 |
 | 历史上游 `dsh-purge` 1.1.71 | MIT | 经 community 的 NOTICE 继承 |
 

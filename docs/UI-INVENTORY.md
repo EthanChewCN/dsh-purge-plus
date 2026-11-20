@@ -59,7 +59,7 @@ body：`StatusStrip` → `PurgifySection page="status"` → `StatusExtras` → `
 | 顶部状态条 | DSH 版本、兼容级别（qualified/unverified/…）、`磁盘写入计数 applied/total · N 条本机不适用`、插件版本 | 无（纯展示，每个指标带 `HelpTip` 问号） | `GET /dsh-purge/status` | `client.js:13829`；调用 `client.js:13959` |
 | 标题行 | `状态` + 右侧操作组 + 扫描时间 | 应用（带待应用条数）、回退、卸载、刷新（显示上次扫描时间） | `POST /dsh-purge/apply`、`POST /dsh-purge/revert`、`POST /dsh-purge/uninstall`、`GET /dsh-purge/status` | `client.js:11529` 起 `doAction`；fetch 在 `client.js:11539`；卸载 `client.js:11762` |
 | 换包/布局提示 | `app.asar` 是否仍封、换包阶段（starting/ready/waiting_for_quit/…）、失败详情与 win32 code | 无（`details` 可展开） | `GET /dsh-purge/status`（`host_layout` / `asar_handoff` 字段） | `client.js:13885` |
-| 版本不一致提示 | 官方版本 ≠ `1.7.20-plus.3` 时告警 | 无 | 同上（`plugin_version`） | `client.js:13934` |
+| 版本不一致提示 | 官方版本 ≠ 本包版本（构建时写入，当前 `0.1.37`）时告警 | 无 | 同上（`plugin_version`） | `client.js:13934` |
 | 健康度 | 大数字 `applied / denom`、判定语、三段进度条、四个格子（已应用/待应用/未生效/不适用） | 无 | `GET /dsh-purge/status`（`patch_rows`） | `client.js:10425` |
 | 补丁组开关 | 「权限补丁组」「上下文管理」两个开关，各带 chip（已写入/待应用条数） | 拨动开关（写 tuning，需再点「应用」才落宿主） | `GET/POST /dsh-purge/boost`（`permissionPatches` / `contextManagement`） | `client.js:10533`；POST `client.js:10568` |
 | 补丁明细 | 按组折叠的补丁表：编号、名称、英文标识、状态胶囊；顶部筛选（全部/待应用/未生效/不适用）与每组计数 | 展开/收起组、切换筛选（纯前端） | `GET /dsh-purge/status` | `client.js:10633`（`FILTERS` 在 `10632`） |
@@ -364,7 +364,7 @@ op 解析顺序（rules / skills 都是）：`forcedOp` → `body.op` → URL ta
 |---|---|---|---|---|---|
 | `sidebar.panellist` | `dsh-purge` | 30 | `PurgeGlyphIcon` | 侧栏图标（`label: "Purge"`，用 `sidebar-glyph.png` 做 mask） | `client.js:15552-15564`；图标 `15484` |
 | `main` | key `dsh-purge` | — | `PurgePage` | 六 tab 主面板 | `client.js:15565-15575` |
-| `plugins.bundle.config` | key `dsh-purge-plus` | — | `DetailSettings` | 插件详情页：`view==="summary"` 时只显示 `Purge · 1.7.20-plus.3`，否则整块 `PurgePage` | `client.js:15576-15586`；`15501` |
+| `plugins.bundle.config` | key `dsh-purge-plus` | — | `DetailSettings` | 插件详情页：`view==="summary"` 时只显示 `Purge · <版本>`（当前 `0.1.37`），否则整块 `PurgePage` | `client.js:15576-15586`；`15501` |
 | `plugins.row.config` | key `dsh-purge-plus#dsh-purge` | — | `DetailSettings` | 插件行内的配置入口（同上） | `client.js:15587-15597` |
 | `shell.overlay` | `dsh-purge-panel-overlays` | 60 | `PanelOverlays` | `WelcomeNotice`（首启免责声明，读 `WELCOME_KEY` ack）+ `EnvAdaptSendGate`（红队发送前环境门禁对话框）+ `AuthGate`（演练台授权弹窗） | `client.js:15541-15551`；`15506` |
 | `conversation.input.right` | `dsh-purge-rewind` | 20 | `RewindSafe`（→ `RewindButton`） | 输入框右侧「回退」按钮：POST `/dsh-purge/rewind`，把上次发送内容清掉并回填输入框 | `client.js:14955-14968`；`14828` |

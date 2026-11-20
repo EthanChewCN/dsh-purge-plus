@@ -89,6 +89,8 @@
         h('details', { className: 'rt-card' },
           h('summary', null, '攻击文件 · ' + fileCount),
           h('div', { role: 'region', tabIndex: 0, 'aria-label': '文件内容，支持滚动' },
-            h(AttackFilesTab, { engagement: eng, refreshKey: refreshKey }))))
+            h(AttackFilesTab, { engagement: eng, refreshKey: refreshKey }))),
+        /* 留下的东西要能「当场登记、当场收口」：之前只有 redteam_cleanup 工具能写 */
+        h(CleanupPanel, { engagement: eng, refreshKey: refreshKey, onChanged: load }))
     }
 

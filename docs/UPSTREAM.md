@@ -3,29 +3,33 @@
 ## 版本号规则
 
 ```
-<community 版本>-plus.<overlay 修订号>
-例: 1.7.20-plus.1
+0.1.<overlay 修订号>
+例: 0.1.37
 ```
 
-- 上游升版 → `1.7.21-plus.1`（overlay 修订号重置为 1）
-- 只改 overlay（加补丁 / 修锚点）→ `1.7.20-plus.2`
-- 改 `PLUS_REV=3 node scripts/build.mjs` 可临时指定
+- 本包版本号与上游基座**解耦**。上游升版不改我们的版本号；基座版本记进
+  `package.json` 的 `plus.base`，只作溯源，不参与版本号、不进面板、不进发行资产名。
+- 只改 overlay（加补丁 / 修锚点 / 改前端）→ 修订号 +1。
+- `PLUS_REV=38 node scripts/build.mjs` 可临时指定；`PLUS_VERSION=0.2.0` 可整体改号。
+- 历史 tag `v1.7.20-plus.N` 仍能被更新器解析（`FORK_RELEASE_RE` 保留 `-plus.N` 分支），
+  不会因为放宽而拒绝老发行。但版本比较是**数字序**：`0.1.37 < 1.7.20-plus.36`，所以
+  从旧版本迁到 `0.1.x` 必须**手工装一次**（面板不会把它当更新）；之后 `0.1.38 > 0.1.37`，
+  面板升级恢复正常。
 
 ## 两个上游
 
 | 上游 | 仓库 | 可见性 | 怎么拿新版本 |
 |---|---|---|---|
-| **community**（基座） | `kingcharleslzy-ai/dsh-purge` | **私有** | 需要仓库权限，或从已安装机器上取发行物 tgz |
+| **community**（基座） | `kingcharleslzy-ai/dsh-purge` | 公开 | `git clone` 或 GitHub Release |
 | **safe**（移植来源） | `CallMeGuLab/dsh-purge-safe` | 公开 | `git clone --depth 1 --branch v<ver>` 或 GitHub Release |
 
 ### community 新版本从哪来
 
-它是私有仓库，CI 产物落在 `~/.dsh/dsh-purge-community/pkgs/<sha256>/dsh-purge-community-<ver>.tgz`。
-两条路：
+仓库公开，可以直接 `git clone` 后 `npm pack`（注意发行物 `files` 字段只含运行时文件，
+`test/` 与构建脚本不在包里 —— 要跑它的测试得用仓库本体）。
 
-1. **等它自己更新**：DSH 面板里 community 的更新通道会拉 tgz 落到上面那个路径，取最新的即可。
-2. **有仓库权限**：`git clone` 后 `npm pack`（但注意发行物 `files` 字段只含运行时文件，
-   `test/` 与构建脚本不在包里 —— 要跑它的测试得用仓库本体）。
+另一条路是**等它自己更新**：DSH 面板里 community 的更新通道会拉 tgz 落到
+`~/.dsh/dsh-purge-community/pkgs/<sha256>/dsh-purge-community-<ver>.tgz`，取最新的即可。
 
 ## 升级流程
 

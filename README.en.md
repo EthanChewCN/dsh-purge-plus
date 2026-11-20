@@ -12,7 +12,7 @@ Separate the host layer from the model layer: whether the model is willing to an
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
-Version **1.7.20-plus.3** · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
+Version **0.1.37** · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
 
 </div>
 
@@ -52,9 +52,9 @@ It does not change the model, the cloud account, or upload prompts and configura
 ## Three design lines
 
 ```
-base    dsh-purge-community 1.7.20   MIT         88 host patches · patch engine · ops layer
-port    dsh-purge-safe      2.0.0    Apache-2.0  a branch with a wider capability surface
-result  dsh-purge-plus      1.7.20-plus.3        93 patches · 11 read-only checks
+base    dsh-purge Community   MIT         host patches · patch engine · ops layer
+port    dsh-purge safe        Apache-2.0  a branch with a wider capability surface
+result  dsh-purge-plus        variant     93 patches · 11 read-only checks
 ```
 
 This repo is **not** a fork of community and **not** a fork of safe. It treats both upstreams as read-only inputs:
@@ -84,6 +84,8 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 ---
 
 ## Relationship to the two upstreams
+
+**Based on dsh-purge Community + dsh-purge safe, independently maintained.** Both upstreams are read-only inputs; this repo follows neither upstream's version number.
 
 | Dimension | dsh-purge-community | dsh-purge-safe | This repo |
 | :--- | :--- | :--- | :--- |
@@ -137,14 +139,14 @@ node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
 node scripts/verify.mjs     # 11 read-only checks, host untouched
 ```
 
-Then DSH panel → **Plugins → Install from file** → pick `dist/dsh-purge-plus-1.7.20-plus.3.tgz` → restart DSH.
+Then DSH panel → **Plugins → Install from file** → pick `dist/dsh-purge-plus-<ver>.tgz` → restart DSH.
 
 ### Option 2: command line
 
 ```bash
 cd ~/.dsh/profiles/desktop
 pnpm remove dsh-purge-community
-pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-1.7.20-plus.3.tgz"
+pnpm add "file:$HOME/Documents/dsh-purge-plus/dist/dsh-purge-plus-<ver>.tgz"
 ```
 
 Afterwards confirm `dsh.profile.bundles` in `package.json` contains **`dsh-purge-plus`** and that `node_modules/dsh-purge-plus/` exists.
@@ -266,8 +268,8 @@ This repo is an **independent variant**. It is not affiliated with, and not endo
 
 | Source | License | Obligation |
 | :--- | :--- | :--- |
-| `vendor/community/` · dsh-purge-community 1.7.20 | MIT | keep copyright + full license + NOTICE |
-| `vendor/safe/` · dsh-purge-safe 2.0.0 | Apache-2.0 | keep license + NOTICE + **per-file change marking** + no implied endorsement |
+| `vendor/community/` · dsh-purge Community (current vendor snapshot) | MIT | keep copyright + full license + NOTICE |
+| `vendor/safe/` · dsh-purge safe (current vendor snapshot) | Apache-2.0 | keep license + NOTICE + **per-file change marking** + no implied endorsement |
 | redteam module | MIT | keep the copyright notice |
 | historical upstream `dsh-purge` 1.1.71 | MIT | inherited via community's NOTICE |
 

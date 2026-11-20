@@ -1,5 +1,9 @@
 # safe 独有 UI 功能与移植判定
 
+> **本文件是移植前的缺口快照，不是实时状态。** 实时进度以 [`PROGRESS.md`](PROGRESS.md) 为准；
+> 下面那些「0」「无」是**当时**的对照结果，已经补上的项不会回写到这里——回写会让这份文档
+> 变成第二份进度账本，两份一冲突就没人知道该信哪个。
+
 > 对照对象：`vendor/safe/`（dsh-purge-safe 2.0.0）vs `vendor/community/`（dsh-purge-community 1.7.20）
 > 口径：**只看浏览器半侧**（`client.js` / `lib/redteam/client.js` / `lib/ui-*.js`）+ 它们直接依赖的 op 与表结构。
 > 所有行号均为该文件当前内容的一次性快照，改动前请以符号名重新定位。
