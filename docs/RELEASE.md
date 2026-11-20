@@ -128,7 +128,7 @@ PLUS_REV=1 node scripts/build.mjs && node scripts/verify.mjs
 
 | tag | 资产 | sha256 | 状态 |
 |---|---|---|---|
-| `v1.7.20-plus.1` | `dsh-purge-plus-1.7.20-plus.1.tgz` + `SHA256SUMS.txt` | `60254f52…f2abd4` | 正式发行，匿名可读 |
+| `v1.7.20-plus.1` | `dsh-purge-plus-1.7.20-plus.1.tgz` + `SHA256SUMS.txt` | `fa2234c6…00bf7` | 正式发行，匿名可读 |
 
 ### 发布后实测（不是推测）
 
