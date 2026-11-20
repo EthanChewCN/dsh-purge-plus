@@ -2430,6 +2430,114 @@ export function buildEdits(repo = resolveRepo()) {
       find: 'export const QUALIFIED_HOST_VERSIONS = Object.freeze(["0.2.2-rc.3",',
       replace: 'export const QUALIFIED_HOST_VERSIONS = Object.freeze(["0.2.2-rc.5", "0.2.2-rc.3",',
     },
+    // ══ P24. 版本换轨后技能页整页空白 ════════════════════════════
+    // 上游把「技能页是否可见」写成了 1.x 语义的版本比较：
+    //   主版本 ≠ 1 → 只返回「是否 > 1」；次版本 ≠ 1 → 同理；最后才比补丁号 ≥ 12。
+    // 本仓库版本从 1.7.20-plus.N 换成 0.1.N 后，0.1.39 走「0 > 1」= false，
+    // SkillsSection 直接 `if (!onBeta) return null` —— 整个页签渲染成 null，
+    // 连「暂无用户 Skill」都不显示，用户看到的就是一块空白。
+    // 技能接口是否存在本来就由 skillsRouteMissing 在调用时判（err.skills.needRestart），
+    // 这层版本门槛在本仓库没有存在意义：只看「状态载荷拿到了没有」。
+    {
+      file: "client.js",
+      required: true,
+      find:
+        '  const ver = String(d.plugin_version || d.localVersion || "").replace(\n' +
+        "    /^v/i,\n" +
+        '    ""\n' +
+        "  );\n" +
+        "  if (/^1\\.1\\.11(?:-|$)/.test(ver)) return false;\n" +
+        "  const parts = ver.match(/^(\\d+)\\.(\\d+)\\.(\\d+)/);\n" +
+        "  if (!parts) return false;\n" +
+        "  if (+parts[1] !== 1) return +parts[1] > 1;\n" +
+        "  if (+parts[2] !== 1) return +parts[2] > 1;\n" +
+        "  return +parts[3] >= 12;",
+      replace:
+        "  /* [dsh-purge-plus] 原判定按上游 1.x 语义写死（主版本≠1 时只比是否 >1）。\n" +
+        "     本仓库换成 0.1.N 方案后 0.1.x 一律被判成「低于 1.1.12」，\n" +
+        "     技能页 return null → 整页空白。接口可用性由 skillsRouteMissing 判，\n" +
+        "     这里只确认状态载荷拿到了。 */\n" +
+        '  return typeof d === "object" && d !== null && (d.ok === undefined || d.ok === true);',
+    },
+    // 空态要能说出「为什么是空的」：listSkills 按设计跳过死链，但目录里
+    // 全是死链时，只说「暂无用户 Skill」等于让人以为自己清空了技能库。
+    {
+      file: "client.js",
+      required: true,
+      find: "      if (d && d.ok) setSt({ ok: true, skills: d.skills || [] });",
+      replace:
+        "      if (d && d.ok) setSt({ ok: true, skills: d.skills || [], dead: d.skills_dead || 0 });",
+    },
+    {
+      file: "client.js",
+      required: true,
+      find: '    list = h("p", { className: "dshpp-empty" }, t("skills.empty"));',
+      replace:
+        "    /* [dsh-purge-plus] 死链被跳过后要说出来，否则空态文案会误导 */\n" +
+        "    list = h(\n" +
+        '      "p",\n' +
+        '      { className: "dshpp-empty" },\n' +
+        '      st && st.dead ? t("skills.empty") + " · " + t("skills.dead", { count: st.dead }) : t("skills.empty")\n' +
+        "    );",
+    },
+    {
+      file: "client.js",
+      required: true,
+      find: '  "skills.empty": "\\u6682\\u65E0\\u7528\\u6237 Skill",',
+      replace:
+        '  "skills.empty": "\\u6682\\u65E0\\u7528\\u6237 Skill",\n' +
+        '  "skills.dead": "{count} \\u4E2A\\u5931\\u6548\\u94FE\\u63A5\\u5DF2\\u8DF3\\u8FC7",',
+    },
+    {
+      file: "client.js",
+      required: true,
+      find: '  "skills.empty": "No user skills",',
+      replace:
+        '  "skills.empty": "No user skills",\n' +
+        '  "skills.dead": "{count} broken symlink(s) skipped",',
+    },
+    // 后端：把死链数量报给面板（listSkills 跳过死链是对的，但跳过要可见）
+    {
+      file: "lib/skills.js",
+      required: true,
+      find: "export async function skillsStatus(dshHome) {\n  const listed = await listSkills(dshHome);",
+      replace:
+        "/* [dsh-purge-plus] 死链统计。listSkills 按设计跳过死链（数据问题不等于判定问题），\n" +
+        "   但「跳过」必须让人看见：目录里全是死链时，空态得说明为什么是空的。 */\n" +
+        "export async function deadSkillLinks(dshHome) {\n" +
+        "  const dir = skillsDir(dshHome);\n" +
+        "  let entries = [];\n" +
+        "  try {\n" +
+        "    entries = await fsp.readdir(dir, { withFileTypes: true });\n" +
+        "  } catch {\n" +
+        "    return [];\n" +
+        "  }\n" +
+        "  const dead = [];\n" +
+        "  for (const entry of entries) {\n" +
+        "    if (!entry.isSymbolicLink()) continue;\n" +
+        "    try { await fsp.stat(path.join(dir, entry.name)); } catch { dead.push(entry.name); }\n" +
+        "  }\n" +
+        "  return dead.sort();\n" +
+        "}\n" +
+        "\n" +
+        "export async function skillsStatus(dshHome) {\n" +
+        "  const listed = await listSkills(dshHome);",
+    },
+    {
+      file: "lib/skills.js",
+      required: true,
+      find:
+        "      path: displayUnderHome(dshHome, item.path),\n" +
+        "    })),\n" +
+        "  };\n" +
+        "}",
+      replace:
+        "      path: displayUnderHome(dshHome, item.path),\n" +
+        "    })),\n" +
+        "    skills_dead: await deadSkillLinks(dshHome),\n" +
+        "  };\n" +
+        "}",
+    },
   ];
 }
 

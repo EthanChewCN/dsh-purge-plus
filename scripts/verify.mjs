@@ -275,6 +275,36 @@ console.log("[10] client.js 界面版本");
     : ok("README 不写死版本号（跟随 Release 徽章）");
 }
 
+console.log("[10b] 技能页可见性（版本换轨回归）");
+{
+  const js = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+  const pkg3 = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
+  /* 上游的门槛按 1.x 语义写：主版本≠1 时只比「是否 >1」。本仓库换到 0.1.N 后
+     0.1.x 一律被判成「低于 1.1.12」，SkillsSection 直接 return null → 整页空白。
+     这是换轨时真实发生过的回归，锁死它。 */
+  /\+\s*parts\[1\]\s*!==\s*1/.test(js)
+    ? bad("client.js 仍有 1.x 语义的版本门槛（0.1.N 会被判成过旧）")
+    : ok("client.js 无 1.x 语义版本门槛");
+  const fnText = js.match(/function skillUiAllowed\(d\) \{[\s\S]*?\n\}/);
+  if (!fnText) bad("找不到 skillUiAllowed");
+  else {
+    let allowed;
+    try {
+      allowed = new Function(`${fnText[0]}; return skillUiAllowed;`)()({
+        ok: true,
+        plugin_version: pkg3.version,
+      });
+    } catch (e) {
+      bad(`skillUiAllowed 求值失败：${e.message}`);
+    }
+    if (allowed === true) ok(`skillUiAllowed(${pkg3.version}) = true（技能页可见）`);
+    else if (allowed === false) bad(`skillUiAllowed(${pkg3.version}) = false → 技能页整页空白`);
+  }
+  const sk = fs.readFileSync(path.join(PKG, "lib/skills.js"), "utf8");
+  sk.includes("skills_dead: await deadSkillLinks(") ? ok("status 回报 skills_dead") : bad("status 未回报 skills_dead");
+  js.includes('"skills.dead"') ? ok("空态文案含失效链接提示") : bad("空态文案缺失效链接提示");
+}
+
 console.log("[11] 演练台「凭据与文件」页");
 {
   const files = ["lib/redteam/client.js", "client.js"];
