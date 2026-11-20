@@ -533,6 +533,227 @@ export function buildEdits(repo = resolveRepo()) {
         "    return { dir, total: items.length, matched: out.length, offset: skip, items: out.slice(skip, skip + cap) }\n" +
         "  }",
     },
+
+    // ══ H. P1：会话 → 靶标绑定层（sessions.json）═════════════════════
+    // 上游 community 的绑定是**进程内 Map**：dsh 一重启就全没了，面板也无从知道
+    // 「我这个会话绑的是谁」，只能永远跟全局指针。safe 把它落成了 sessions.json，
+    // 但用 writeFileSync 直接覆盖 —— 崩在写一半会留下半截 JSON，而读取侧把坏
+    // JSON 当作「还没绑过」，于是**全部绑定静默消失**。
+    // 这里照搬它的表结构，改用 atomicWriteSync（临时文件 + rename）。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: 'import { removeTreeNoFollowSync } from "../remove-tree.js";',
+      replace:
+        'import { removeTreeNoFollowSync } from "../remove-tree.js";\n' +
+        "import { atomicWriteSync } from '../atomic-files.js' // [dsh-purge-plus] 会话绑定表原子写",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  /** 切换当前靶标（界面切换或智能体绑定时调用）。 */\n" +
+        "  setActiveEngagement(id) {\n" +
+        "    if (!id || !existsSync(this.dbPathOf(id))) return false\n" +
+        "    mkdirSync(this.root, { recursive: true })\n" +
+        "    writeFileSync(this.currentPath(), String(id), 'utf8')\n" +
+        "    return true\n" +
+        "  }",
+      replace:
+        "  /** 切换当前靶标（界面切换或智能体绑定时调用）。 */\n" +
+        "  setActiveEngagement(id) {\n" +
+        "    if (!id || !existsSync(this.dbPathOf(id))) return false\n" +
+        "    mkdirSync(this.root, { recursive: true })\n" +
+        "    writeFileSync(this.currentPath(), String(id), 'utf8')\n" +
+        "    return true\n" +
+        "  }\n" +
+        "\n" +
+        "  /* ---------- [dsh-purge-plus] 会话 → 靶标绑定 ---------- */\n" +
+        "\n" +
+        "  /** 绑定表落盘路径：与 `current` 同级，纯文本 JSON，方便人工核对与备份。 */\n" +
+        "  sessionBindingsPath() { return join(this.root, 'sessions.json') }\n" +
+        "\n" +
+        "  /**\n" +
+        "   * 读出全部会话绑定。形状 `{ v: 1, agents: { <会话 id>: { engagement, name, at } } }`。\n" +
+        "   *\n" +
+        "   * 容错口径：文件缺失、半截 JSON、字段类型不对，一律当作「还没绑过」。\n" +
+        "   * 绑定表是**加速器不是事实来源**——它坏了只该退化成「面板不跟随」，\n" +
+        "   * 不该让面板打不开，更不该让工具调不动。\n" +
+        "   */\n" +
+        "  sessionBindings() {\n" +
+        "    let parsed = null\n" +
+        "    try { parsed = JSON.parse(readFileSync(this.sessionBindingsPath(), 'utf8')) } catch { parsed = null }\n" +
+        "    const agents = parsed && parsed.agents && typeof parsed.agents === 'object' ? parsed.agents : {}\n" +
+        "    const out = {}\n" +
+        "    for (const [key, value] of Object.entries(agents)) {\n" +
+        "      if (!value || typeof value !== 'object') continue\n" +
+        "      const engagement = typeof value.engagement === 'string' ? value.engagement : ''\n" +
+        "      if (!engagement) continue\n" +
+        "      out[key] = {\n" +
+        "        engagement,\n" +
+        "        name: typeof value.name === 'string' && value.name ? value.name : engagement,\n" +
+        "        at: typeof value.at === 'string' ? value.at : null,\n" +
+        "      }\n" +
+        "    }\n" +
+        "    return out\n" +
+        "  }\n" +
+        "\n" +
+        "  /** 某个会话绑定的靶标 id（没绑过返回 undefined）。 */\n" +
+        "  sessionBinding(sessionId) {\n" +
+        "    if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined\n" +
+        "    const entry = this.sessionBindings()[sessionId]\n" +
+        "    return entry ? entry.engagement : undefined\n" +
+        "  }\n" +
+        "\n" +
+        "  /**\n" +
+        "   * 写入一条会话绑定。\n" +
+        "   *\n" +
+        "   * 写入方三处，都只写**根会话 id**（子智能体沿父链继承，写子会话只会让表变脏）：\n" +
+        "   * 智能体工具（open / session_bind 解析出靶标时）、面板切下拉（带 session 时）、\n" +
+        "   * 以及 activateEngagement。\n" +
+        "   *\n" +
+        "   * 与上游 safe 的差异：safe 用 writeFileSync 直接覆盖，进程崩在写一半会留下\n" +
+        "   * 半截 JSON，而读取侧把坏 JSON 当作「还没绑过」→ 全部绑定静默消失。\n" +
+        "   * 这里用 atomicWriteSync（写临时文件 + rename），读到的一定是旧内容或新内容。\n" +
+        "   *\n" +
+        "   * @returns 是否写入成功（靶标不存在时不写，避免留下指向已删靶标的绑定）。\n" +
+        "   */\n" +
+        "  setSessionBinding(sessionId, engagement, name) {\n" +
+        "    if (typeof sessionId !== 'string' || sessionId.length === 0) return false\n" +
+        "    if (typeof engagement !== 'string' || engagement.length === 0) return false\n" +
+        "    if (!existsSync(this.dbPathOf(engagement))) return false\n" +
+        "    const all = this.sessionBindings()\n" +
+        "    all[sessionId] = { engagement, name: typeof name === 'string' && name ? name : engagement, at: nowIso() }\n" +
+        "    /* 只留最近 200 条、且靶标还存在的：表是加速器，无限增长没有意义 */\n" +
+        "    const pruned = {}\n" +
+        "    const rows = Object.entries(all)\n" +
+        "      .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at)))\n" +
+        "      .slice(0, 200)\n" +
+        "    for (const [key, value] of rows) {\n" +
+        "      if (existsSync(this.dbPathOf(value.engagement))) pruned[key] = value\n" +
+        "    }\n" +
+        "    mkdirSync(this.root, { recursive: true })\n" +
+        "    try {\n" +
+        "      atomicWriteSync(this.sessionBindingsPath(), JSON.stringify({ v: 1, agents: pruned }, null, 2))\n" +
+        "    } catch { return false }\n" +
+        "    return true\n" +
+        "  }\n" +
+        "\n" +
+        "  /** 解绑（面板「不再跟随」用）。返回是否真的删掉了。 */\n" +
+        "  clearSessionBinding(sessionId) {\n" +
+        "    if (typeof sessionId !== 'string' || sessionId.length === 0) return false\n" +
+        "    const all = this.sessionBindings()\n" +
+        "    if (!Object.prototype.hasOwnProperty.call(all, sessionId)) return false\n" +
+        "    delete all[sessionId]\n" +
+        "    try {\n" +
+        "      atomicWriteSync(this.sessionBindingsPath(), JSON.stringify({ v: 1, agents: all }, null, 2))\n" +
+        "      return true\n" +
+        "    } catch { return false }\n" +
+        "  }",
+    },
+    // activateEngagement 带上 session 时顺带落盘：面板切下拉的那一刻就记住，
+    // 而不是等下一次工具调用。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    if (op === 'activateEngagement') {\n" +
+        "      const activated = store.setActiveEngagement(req.engagement)\n" +
+        "      return { ok: activated, current: store.activeEngagementId() }\n" +
+        "    }",
+      replace:
+        "    if (op === 'activateEngagement') {\n" +
+        "      const activated = store.setActiveEngagement(req.engagement)\n" +
+        "      /* [dsh-purge-plus] 面板切换时带上 session：这一刻就记住「这个会话用这个靶标」，\n" +
+        "         重启后面板仍能跟随。不带 session 的老调用方行为不变。 */\n" +
+        "      if (activated && typeof req.session === 'string' && req.session) {\n" +
+        "        try { store.setSessionBinding(req.session, req.engagement, req.name) } catch { /* 绑定失败不影响切换 */ }\n" +
+        "      }\n" +
+        "      return { ok: activated, current: store.activeEngagementId() }\n" +
+        "    }\n" +
+        "    /* [dsh-purge-plus] 会话 ↔ 靶标绑定：落盘在 sessions.json，重启后仍在。\n" +
+        "       三个 op 都不依赖「当前靶标」，所以和知识库一样放在全局段。 */\n" +
+        "    if (op === 'sessionBinding' || op === 'sessionBindings') {\n" +
+        "      const rawSession = typeof req.session === 'string' ? req.session : ''\n" +
+        "      let root = rawSession\n" +
+        "      if (rawSession && typeof req.resolveRoot === 'function') {\n" +
+        "        try {\n" +
+        "          const resolved = req.resolveRoot(rawSession)\n" +
+        "          if (typeof resolved === 'string' && resolved) root = resolved\n" +
+        "        } catch { /* 解析器坏掉时按原样处理 */ }\n" +
+        "      }\n" +
+        "      const bound = root ? store.sessionBinding(root) : undefined\n" +
+        "      const meta = bound ? store.listEngagements().find((e) => e.id === bound) : undefined\n" +
+        "      const base = {\n" +
+        "        ok: true,\n" +
+        "        session: rawSession || null,\n" +
+        "        root_session: root || null,\n" +
+        "        bound: bound || null,\n" +
+        "        name: bound ? ((meta && meta.name) || bound) : null,\n" +
+        "        current: store.activeEngagementId() || null,\n" +
+        "      }\n" +
+        "      if (op === 'sessionBinding') return base\n" +
+        "      const agents = store.sessionBindings()\n" +
+        "      const existing = new Set(store.listEngagements().map((e) => e.id))\n" +
+        "      const cleaned = {}\n" +
+        "      for (const [key, value] of Object.entries(agents)) if (existing.has(value.engagement)) cleaned[key] = value\n" +
+        "      return Object.assign(base, { agents: cleaned })\n" +
+        "    }\n" +
+        "    if (op === 'bindSessionEngagement') {\n" +
+        "      const sid = typeof req.session === 'string' ? req.session : ''\n" +
+        "      if (!sid) return { ok: false, error: 'session required' }\n" +
+        "      /* engagement 为空 = 解绑（面板上的「不再跟随」） */\n" +
+        "      if (!req.engagement) return { ok: store.clearSessionBinding(sid), session: sid, bound: null }\n" +
+        "      const written = store.setSessionBinding(sid, req.engagement, req.name)\n" +
+        "      return { ok: written, session: sid, bound: written ? req.engagement : null }\n" +
+        "    }",
+    },
+    // 工具侧的显式绑定也要落盘，否则智能体绑完、面板还是不知道。
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "function bindKeysOf(exec) {\n" +
+        "  const { rootId, sessionId, chain } = bindingKeyOf(exec)\n" +
+        "  return Array.from(new Set([rootId, sessionId, ...chain].filter(Boolean)))\n" +
+        "}",
+      replace:
+        "function bindKeysOf(exec) {\n" +
+        "  const { rootId, sessionId, chain } = bindingKeyOf(exec)\n" +
+        "  return Array.from(new Set([rootId, sessionId, ...chain].filter(Boolean)))\n" +
+        "}\n" +
+        "\n" +
+        "/**\n" +
+        " * [dsh-purge-plus] 把「根会话 → 靶标」落盘（sessions.json）。\n" +
+        " *\n" +
+        " * 进程内的 bindings Map 只活到 dsh 重启：重启后各会话都得重新绑一次，面板也\n" +
+        " * 无从知道「我这个会话绑的是谁」。落一份到磁盘，面板据此跟随、重启后仍在。\n" +
+        " * 只写根会话；失败只影响「面板跟不跟随」，所以不抛错。\n" +
+        " */\n" +
+        "function persistRootBinding(store, exec, engagement, name) {\n" +
+        "  try {\n" +
+        "    const { rootId } = bindingKeyOf(exec)\n" +
+        "    if (!rootId) return\n" +
+        "    store.setSessionBinding(rootId, engagement, name)\n" +
+        "  } catch { /* 绑定表是加速器，不是事实来源 */ }\n" +
+        "}",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find: "      for (const key of keys) bindings.set(key, engagement.id)",
+      replace:
+        "      for (const key of keys) bindings.set(key, engagement.id)\n" +
+        "      persistRootBinding(store, exec, engagement.id, engagement.name) // [dsh-purge-plus]",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find: "      for (const key of keys) bindings.set(key, hit.id)",
+      replace:
+        "      for (const key of keys) bindings.set(key, hit.id)\n" +
+        "      persistRootBinding(store, exec, hit.id, hit.name) // [dsh-purge-plus]",
+    },
   ];
 }
 

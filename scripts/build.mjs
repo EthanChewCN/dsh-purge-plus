@@ -124,7 +124,14 @@ log(`✓ 用户可见文案去上游品牌（${BRAND_FIXES.length} 条）`);
 //   lib/redteam/client.js  独立全屏窗口用，hyperscript 叫 h，hooks 走 React.useState
 //   client.js              面板内嵌那份，hyperscript 叫 h2，hooks 走 import_react2.default.useState
 // 两份都要改，否则「面板里点开」和「全面浏览新窗口」会看到不一样的页签。
-const SNIPPET_SRC = fs.readFileSync(path.join(ROOT, "overlay", "snippets", "artifacts-tab.js"), "utf8");
+const SNIPPET_DIR = path.join(ROOT, "overlay", "snippets");
+const snippetCache = new Map();
+function readSnippet(name) {
+  const key = name || "artifacts-tab.js";
+  if (!snippetCache.has(key)) snippetCache.set(key, fs.readFileSync(path.join(SNIPPET_DIR, key), "utf8"));
+  return snippetCache.get(key);
+}
+const SNIPPET_SRC = readSnippet("artifacts-tab.js");
 
 /** 把 snippet 适配到某一份产物的方言。 */
 function adaptSnippet(text, dialect) {
@@ -132,7 +139,8 @@ function adaptSnippet(text, dialect) {
   // panel：h → h2，React.xxx → import_react2.default.xxx，整体缩进减 2 空格
   const swapped = text
     .replace(/\bReact\./g, "import_react2.default.")
-    .replace(/(^|[^\w$.])h\(/g, "$1h2(");
+    .replace(/(^|[^\w$.])h\(/g, "$1h2(")
+    /* h('div', ...) 里的字符串子节点不受影响；这里只把模板里的 h( 换成 h2( */;
   return swapped
     .split("\n")
     .map((line) => (line.startsWith("  ") ? line.slice(2) : line))
@@ -168,14 +176,164 @@ const SNIPPETS = [
     anchor: '    else if (st.tab === "scores")\n', mode: "before",
     text: '    else if (st.tab === "artifacts")\n      body = h2(ArtifactsTab, { engagement: eng, refreshKey });\n',
   },
+
+  // ── P1：面板跟随「本会话绑定的靶标」 ──────────────────────────────
+  // 只改 client.js：宿主上下文（host2 / currentSessionId）只在这份产物里存在，
+  // lib/redteam/client.js 是它的可读源形，不含宿主接线。
+  {
+    file: "client.js", dialect: "panel", what: "会话跟随：状态与取 id 助手",
+    anchor: "    const [seen, setSeen] = import_react2.default.useState(null);\n",
+    mode: "after",
+    text:
+      "    /* [dsh-purge-plus] 本会话 → 靶标绑定：启动时问后端「我这个会话绑的是谁」，\n" +
+      "       有绑定就切过去。取不到 sessionId 时退化成原来的「跟全局指针」。 */\n" +
+      "    const rtSessionId = () => {\n" +
+      "      try {\n" +
+      "        return props.sessionId || currentSessionId(host2 && host2.sessions) || \"\";\n" +
+      "      } catch (e) {\n" +
+      "        return \"\";\n" +
+      "      }\n" +
+      "    };\n" +
+      "    const [boundEng, setBoundEng] = import_react2.default.useState(null);\n" +
+      "    const [following, setFollowing] = import_react2.default.useState(false);\n",
+  },
+  {
+    file: "client.js", dialect: "panel", what: "会话跟随：启动时优先用绑定",
+    anchor:
+      "          setEngagements(r.engagements || []);\n" +
+      "          const id = r.current || r.engagements && r.engagements[0] && r.engagements[0].id || null;\n" +
+      "          if (id) {\n" +
+      "            setEng(id);\n" +
+      "            loadSnapshot(id);\n" +
+      "          }\n",
+    mode: "replace",
+    text:
+      "          setEngagements(r.engagements || []);\n" +
+      "          const fallbackId = r.current || r.engagements && r.engagements[0] && r.engagements[0].id || null;\n" +
+      "          const applyId = (id) => {\n" +
+      "            if (!id) return;\n" +
+      "            setEng(id);\n" +
+      "            loadSnapshot(id);\n" +
+      "          };\n" +
+      "          /* [dsh-purge-plus] 本会话绑定优先于全局「当前靶标」指针：\n" +
+      "             多会话并行时指针只有一个，跟着它会把别人的靶标显示到自己面板上。 */\n" +
+      "          const sid0 = rtSessionId();\n" +
+      "          if (!sid0) return applyId(fallbackId);\n" +
+      "          api({ op: \"sessionBinding\", session: sid0 }).then((b) => {\n" +
+      "            if (b && b.ok === true && b.bound) {\n" +
+      "              setBoundEng(b.bound);\n" +
+      "              setFollowing(true);\n" +
+      "              return applyId(b.bound);\n" +
+      "            }\n" +
+      "            applyId(fallbackId);\n" +
+      "          }).catch(() => applyId(fallbackId));\n",
+  },
+  {
+    file: "client.js", dialect: "panel", what: "会话跟随：切换靶标时一并落盘",
+    anchor:
+      "              api({\n" +
+      "                op: \"activateEngagement\",\n" +
+      "                engagement: e.target.value\n" +
+      "              }).catch(() => {\n" +
+      "              });\n",
+    mode: "replace",
+    text:
+      "              /* [dsh-purge-plus] 带上 session：后端顺手写 sessions.json，\n" +
+      "                 重启后面板仍知道「这个会话用的是哪个靶标」。 */\n" +
+      "              const sid1 = rtSessionId();\n" +
+      "              const picked = (engagements.find((x) => x.id === e.target.value) || {}).name;\n" +
+      "              setFollowing(Boolean(sid1));\n" +
+      "              setBoundEng(sid1 ? e.target.value : null);\n" +
+      "              api({\n" +
+      "                op: \"activateEngagement\",\n" +
+      "                engagement: e.target.value,\n" +
+      "                session: sid1 || void 0,\n" +
+      "                name: picked\n" +
+      "              }).catch(() => {\n" +
+      "              });\n",
+  },
+  {
+    file: "client.js", dialect: "panel", what: "会话跟随：跟随徽章",
+    anchor:
+      "            (x) => h2(\"option\", { key: x.id, value: x.id }, x.name || x.id || \"\\u672A\\u547D\\u540D\")\n" +
+      "          )\n" +
+      "        ),\n",
+    mode: "after",
+    text:
+      "        following && boundEng ? h2(\n" +
+      "          \"button\",\n" +
+      "          {\n" +
+      "            className: \"rt-btn\",\n" +
+      "            title: \"\\u672C\\u9762\\u677F\\u8DDF\\u968F\\u672C\\u4F1A\\u8BDD\\u7ED1\\u5B9A\\u7684\\u9776\\u6807\\uFF1B\\u70B9\\u4E00\\u4E0B\\u89E3\\u7ED1\\uFF0C\\u6539\\u4E3A\\u8DDF\\u968F\\u5168\\u5C40\\u300C\\u5F53\\u524D\\u9776\\u6807\\u300D\",\n" +
+      "            onClick: () => {\n" +
+      "              const sid2 = rtSessionId();\n" +
+      "              if (sid2) api({ op: \"bindSessionEngagement\", session: sid2, engagement: \"\" }).catch(() => {\n" +
+      "              });\n" +
+      "              setFollowing(false);\n" +
+      "              setBoundEng(null);\n" +
+      "            }\n" +
+      "          },\n" +
+      "          \"\\u8DDF\\u968F\\u672C\\u4F1A\\u8BDD\"\n" +
+      "        ) : null,\n",
+  },
+
+  // ── P2：会话 → 靶标关系图（SessionMap）────────────────────────────
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", src: "session-map.js",
+    what: "会话关系图组件", anchor: "    function AgentsTab(props) {", mode: "before",
+  },
+  {
+    file: "client.js", dialect: "panel", src: "session-map.js",
+    what: "会话关系图组件（面板内嵌版）", anchor: "  function AgentsTab(props) {", mode: "before",
+  },
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", what: "会话关系图挂进智能体页",
+    anchor: "          h(ConcurrencyCard, { concurrency, onSaved: load }),", mode: "before",
+    text: "          h(SessionMap, { refreshKey: refreshKey, sessionId: props.sessionId, onPick: props.onPick }),\n",
+  },
+  {
+    file: "client.js", dialect: "panel", what: "会话关系图挂进智能体页（面板内嵌版）",
+    anchor: "        h2(ConcurrencyCard, { concurrency, onSaved: load }),", mode: "before",
+    text: "        h2(SessionMap, { refreshKey, sessionId: props.sessionId, onPick: props.onPick }),\n",
+  },
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", what: "会话关系图：点节点切靶标",
+    anchor: "      else if (st.tab === 'agents' || st.tab === 'prompts') body = h(AgentsTab, { engagement: eng, refreshKey: refreshKey })",
+    mode: "replace",
+    text:
+      "      else if (st.tab === 'agents' || st.tab === 'prompts') body = h(AgentsTab, {\n" +
+      "        engagement: eng, refreshKey: refreshKey,\n" +
+      "        sessionId: (typeof rtSessionId === 'function' ? rtSessionId() : ''),\n" +
+      "        /* [dsh-purge-plus] 会话图上的靶标可点：点了就切过去（safe 的图只能看） */\n" +
+      "        onPick: (id) => { if (!id) return; setEng(id); loadSnapshot(id) },\n" +
+      "      })",
+  },
+  {
+    file: "client.js", dialect: "panel", what: "会话关系图：点节点切靶标（面板内嵌版）",
+    anchor: '      body = h2(AgentsTab, { engagement: eng, refreshKey });',
+    mode: "replace",
+    text:
+      "      body = h2(AgentsTab, {\n" +
+      "        engagement: eng,\n" +
+      "        refreshKey,\n" +
+      "        sessionId: (typeof rtSessionId === \"function\" ? rtSessionId() : \"\"),\n" +
+      "        /* [dsh-purge-plus] 会话图上的靶标可点：点了就切过去（safe 的图只能看） */\n" +
+      "        onPick: (id) => {\n" +
+      "          if (!id) return;\n" +
+      "          setEng(id);\n" +
+      "          loadSnapshot(id);\n" +
+      "        }\n" +
+      "      });",
+  },
 ];
 for (const sn of SNIPPETS) {
   const fp = path.join(PKG, sn.file);
   const src = fs.readFileSync(fp, "utf8");
   const hits = src.split(sn.anchor).length - 1;
   if (hits !== 1) die(`演练台移植：${sn.what} 锚点命中 ${hits} 次（要求 1 次）`);
-  const body = sn.text !== undefined ? sn.text : adaptSnippet(SNIPPET_SRC, sn.dialect);
+  const body = sn.text !== undefined ? sn.text : adaptSnippet(readSnippet(sn.src || "artifacts-tab.js"), sn.dialect);
   const next = sn.mode === "before" ? src.replace(sn.anchor, () => body + sn.anchor)
+    : sn.mode === "replace" ? src.replace(sn.anchor, () => body)
     : src.replace(sn.anchor, () => sn.anchor + body);
   fs.writeFileSync(fp, next);
 }

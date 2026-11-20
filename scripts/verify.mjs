@@ -323,6 +323,50 @@ console.log("[12] P0 静默失败四件");
     : bad("byCategory 只给出一种键，面板或工具会拿到 undefined");
 }
 
+console.log("[13] P1 会话绑定层 / P2 会话关系图");
+{
+  const core = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
+  const tools = fs.readFileSync(path.join(PKG, "lib/redteam/tools.js"), "utf8");
+
+  for (const m of ["sessionBindingsPath", "sessionBindings", "sessionBinding", "setSessionBinding", "clearSessionBinding"]) {
+    new RegExp(`\\b${m}\\(`).test(core) ? ok(`store.${m} 存在`) : bad(`store.${m} 缺失`);
+  }
+  // 原子写：sessions.json 的写入不能走 writeFileSync
+  /atomicWriteSync\(this\.sessionBindingsPath\(\)/.test(core)
+    ? ok("sessions.json 用 atomicWriteSync 写（不写半截 JSON）")
+    : bad("sessions.json 未走原子写");
+  /writeFileSync\(this\.sessionBindingsPath\(\)/.test(core)
+    ? bad("sessions.json 仍在用 writeFileSync 直接覆盖")
+    : ok("sessions.json 无 writeFileSync 覆盖");
+
+  for (const op of ["sessionBinding", "sessionBindings", "bindSessionEngagement"]) {
+    new RegExp(`op === '${op}'`).test(core) ? ok(`op ${op} 已接进 dispatch`) : bad(`op ${op} 缺失`);
+  }
+  /store\.setSessionBinding\(req\.session, req\.engagement, req\.name\)/.test(core)
+    ? ok("activateEngagement 带 session 时自动落盘")
+    : bad("activateEngagement 未落盘");
+
+  // 只数调用点：定义那行是 `function persistRootBinding(...)`，顶格，不匹配 ^\s+
+  const persistSites = (tools.match(/^\s+persistRootBinding\(store, exec, /gm) || []).length;
+  persistSites === 2 ? ok("工具侧 2 处显式绑定都落盘（open / session_bind）") : bad(`工具侧落盘点 ${persistSites} 处（要求 2）`);
+
+  for (const f of ["client.js", "lib/redteam/client.js"]) {
+    const src = fs.readFileSync(path.join(PKG, f), "utf8");
+    const comp = (src.match(/function SessionMap\(/g) || []).length;
+    const mount = /h2?\(SessionMap, \{ refreshKey/.test(src);
+    const pick = /onPick: \(id\)/.test(src);
+    const op = src.includes("op: 'sessionBindings'") || src.includes('op: "sessionBindings"');
+    comp === 1 && mount && pick && op
+      ? ok(`${f}：SessionMap 组件 + 挂载 + onPick + 取数 齐`)
+      : bad(`${f}：组件 ${comp} / 挂载 ${mount} / onPick ${pick} / 取数 ${op}`);
+  }
+  // 面板跟随只在 client.js（宿主上下文只在这份产物里）
+  const panel = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+  /const rtSessionId = \(\) =>/.test(panel) && /op: "sessionBinding"/.test(panel)
+    ? ok("client.js：面板启动时按本会话绑定跟随")
+    : bad("client.js：缺少会话跟随接线");
+}
+
 console.log("");
 if (failed) { console.error(`验收失败：${failed} 项`); process.exit(1); }
 console.log("验收通过（本次全程只读，宿主未被修改）。");
