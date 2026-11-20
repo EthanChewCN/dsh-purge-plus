@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
-当前版本 **0.1.37** · 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
+当前版本见上方 Release 徽章（不写死：每发一版都要改文档，改完文档又要再发一版）· 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
 
 </div>
 

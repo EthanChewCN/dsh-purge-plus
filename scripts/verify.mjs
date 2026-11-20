@@ -267,6 +267,12 @@ console.log("[10] client.js 界面版本");
   js.includes(`Plus ${pkg2.version}`) ? ok(`面板徽章 = Plus ${pkg2.version}`) : bad("面板徽章不是本包版本");
   js.includes(`"${pkg2.version}"`) ? ok(`界面版本 = ${pkg2.version}`) : bad(`界面版本不是 ${pkg2.version}`);
   /^0\.1\.\d+$/.test(pkg2.version) ? ok(`版本号方案 0.1.N = ${pkg2.version}`) : bad(`版本号不是 0.1.N：${pkg2.version}`);
+  // README 随包分发，写死本包版本号 → 每发一版都要改文档，改完文档包内容又变，
+  // 于是又要发一版。版本以 Release 徽章为准。
+  const readme = fs.readFileSync(path.join(PKG, "README.md"), "utf8");
+  readme.includes(`**${pkg2.version}**`)
+    ? bad("README 写死了本包版本号")
+    : ok("README 不写死版本号（跟随 Release 徽章）");
 }
 
 console.log("[11] 演练台「凭据与文件」页");

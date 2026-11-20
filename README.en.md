@@ -12,7 +12,7 @@ Separate the host layer from the model layer: whether the model is willing to an
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
-Version **0.1.37** · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
+Version: see the Release badge above (not hardcoded — every release would otherwise force a doc edit, which forces another release) · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
 
 </div>
 
