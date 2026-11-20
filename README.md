@@ -60,12 +60,14 @@ scripts/verify.mjs    只读验收：import / 不变式 / 宿主定位 / 锚点�
 scripts/sync-upstream.sh  上游升级：换 vendor → 重放 overlay → 重建 → 验收
 docs/PORT-MATRIX.md   逐条判定 + 源码证据 + 锚点漂移监控表
 docs/UPSTREAM.md      维护手册：升级、冲突处理、回滚
+docs/LICENSING.md     许可与署名合规清单（不能删的文件、改动标注）
+docs/RELEASE.md       发布流程：让面板「检查更新」能用
 ```
 
 ## 维护模型
 
 **不做 fork-and-edit。** `vendor/` 永远是上游原样，本仓库的改动全部是
-「新增文件 + 精确锚点插入」，共 7 处。升级时整目录替换 `vendor/community`，
+「新增文件 + 精确锚点插入」，共 19 处。升级时整目录替换 `vendor/community`，
 锚点对不上就**构建硬失败**，而不是静默产出一个语义跑偏的包。
 
 ```bash
@@ -74,13 +76,37 @@ docs/UPSTREAM.md      维护手册：升级、冲突处理、回滚
 
 详见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
+## 在线升级
+
+**能在面板里点升级**，和社区版一样。更新器是继承来的，本仓库只把「找谁要新版本」的常量改指自己：
+
+| 改动 | 文件 |
+|---|---|
+| `REPOSITORY` → 本仓库 | `lib/community.js` |
+| `SOURCE_REPO` → 本仓库 | `lib/update-net.js` |
+| 发行 tag 白名单接受 `-plus.N` | `lib/update.js` `FORK_RELEASE_RE` |
+| 已安装包身份认 `dsh-purge-plus` | `lib/installed-package.js` |
+| 升级前直链识别 | `lib/community.js` 的 `fromLatest` 正则 |
+| 回滚允许的依赖名 | `lib/rollback-transaction.js` |
+
+发布约定（tag `v<version>` + 资产 `dsh-purge-plus-<version>.tgz` + `SHA256SUMS.txt`）
+和排错表见 **[docs/RELEASE.md](docs/RELEASE.md)**。
+
+`node scripts/verify.mjs` 的第 [7] 段就是这条链路的自检：
+tag 白名单、资产名、版本比较、旧仓库残留，全部逐项验。
+
 ## 许可
 
-- 本仓库自身：MIT
-- `vendor/community/`：MIT，Copyright (c) 2026 小杨（dsh-purge 原作者），
-  其上游为 `YuJunZhiXue/dsh-purge` 1.1.71
-- 移植自 safe 的代码：Apache-2.0，Copyright CallMeGuLab，
-  全文见 `LICENSE-SAFE-APACHE-2.0.txt`，原 NOTICE 见 `NOTICE-SAFE.txt`
-- 改动说明见 `NOTICE-PLUS.md`
+**本仓库可以公开。** 三份上游许可（MIT / Apache-2.0 / MIT）都明确允许复制、修改、再分发。
 
-本仓库与上述任何上游作者均无隶属或背书关系。
+| 来源 | 许可 | 义务 |
+|---|---|---|
+| `vendor/community/` | MIT，Copyright (c) 2026 小杨 | 保留版权 + 许可全文 + NOTICE |
+| `vendor/safe/` | Apache-2.0，Copyright 2026 CallMeGuLab | 保留许可 + NOTICE + 标注改动 + 不暗示背书 |
+| redteam 模块 | MIT，Copyright (c) 2026 Jueze-2019 | 保留版权声明 |
+| `YuJunZhiXue/dsh-purge` 1.1.71 | MIT | 经 community 的 NOTICE 继承 |
+
+本仓库与上述任何上游作者均**无隶属或背书关系**，是一个独立变体。
+
+绝不能删的文件清单、Apache-2.0 §4(b) 的逐文件改动记录、每次升级后要复查的五项，
+见 **[docs/LICENSING.md](docs/LICENSING.md)**。

@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { EDITS } from "../overlay/edits.mjs";
+import { buildEdits, resolveRepo } from "../overlay/edits.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const VENDOR = path.join(ROOT, "vendor", "community");
@@ -24,11 +24,14 @@ const die = (s) => { console.error("✗ " + s); process.exit(1); };
 if (!fs.existsSync(path.join(VENDOR, "package.json"))) die(`vendor/community 不完整: ${VENDOR}`);
 const basePkg = JSON.parse(fs.readFileSync(path.join(VENDOR, "package.json"), "utf8"));
 const baseVersion = basePkg.version;
+const repo = resolveRepo();
+const REPO_SLUG = `${repo.owner}/${repo.repo}`;
 const plusRev = Number(process.env.PLUS_REV || basePkg.plus?.revision || 1);
 const version = `${baseVersion}-plus.${plusRev}`;
 
 log(`上游基座  ${basePkg.name}@${baseVersion}`);
 log(`本仓库版  dsh-purge-plus@${version}`);
+log(`发布坐标  ${REPO_SLUG}` + (repo.owner === "OWNER" ? "  ⚠ 仍是占位，用 GITHUB_REPO 或 overlay/repo.json 改成真实账号" : ""));
 
 // ── 1. 清空并复制 vendor ───────────────────────────────────────────
 fs.rmSync(BUILD, { recursive: true, force: true });
@@ -41,6 +44,7 @@ fs.cpSync(OVERLAY_FILES, PKG, { recursive: true });
 log(`✓ overlay/files 覆盖完成`);
 
 // ── 3. 应用精确锚点编辑 ───────────────────────────────────────────
+const EDITS = buildEdits(repo);
 let applied = 0, warned = 0;
 for (const [i, e] of EDITS.entries()) {
   const fp = path.join(PKG, e.file);
@@ -50,13 +54,16 @@ for (const [i, e] of EDITS.entries()) {
     log(`  ⚠ ${tag}: 文件不存在，跳过`); warned++; continue;
   }
   const src = fs.readFileSync(fp, "utf8");
+  const want = e.count || 1;
   const hits = countOccurrences(src, e.find);
-  if (hits !== 1) {
-    const msg = `${tag}: 锚点命中 ${hits} 次（要求恰好 1 次）\n    锚点: ${JSON.stringify(e.find.slice(0, 120))}`;
+  if (hits !== want) {
+    const msg = `${tag}: 锚点命中 ${hits} 次（要求恰好 ${want} 次）\n    锚点: ${JSON.stringify(e.find.slice(0, 120))}`;
     if (e.required) die(msg);
     log(`  ⚠ ${msg}`); warned++; continue;
   }
-  fs.writeFileSync(fp, src.replace(e.find, e.replace));
+  // 用函数形式做替换：replace 字符串里可能出现 $ 序列（如正则字面量的 $/），
+  // 直接传字符串会被 String.replace 当成替换模式解释。
+  fs.writeFileSync(fp, want === 1 ? src.replace(e.find, () => e.replace) : src.split(e.find).join(e.replace));
   applied++;
   log(`  ✓ ${tag}`);
 }
@@ -65,14 +72,13 @@ log(`✓ 编辑完成 applied=${applied} warned=${warned}`);
 // ── 4. 重写 package.json ──────────────────────────────────────────
 const pkgPath = path.join(PKG, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-const repo = process.env.GITHUB_REPO || "OWNER/dsh-purge-plus";
 Object.assign(pkg, {
   name: "dsh-purge-plus",
   version,
   description: "以 dsh-purge-community 为基座、移植 dsh-purge-safe 先进能力并长期跟随上游维护的 DSH 附加组件。",
-  homepage: `https://github.com/${repo}#readme`,
-  repository: { type: "git", url: `git+https://github.com/${repo}.git` },
-  bugs: { url: `https://github.com/${repo}/issues` },
+  homepage: `https://github.com/${REPO_SLUG}#readme`,
+  repository: { type: "git", url: `git+https://github.com/${REPO_SLUG}.git` },
+  bugs: { url: `https://github.com/${REPO_SLUG}/issues` },
   dshTarget: "0.2.2-rc.5 (runtime injection + host patches verified)",
 });
 pkg.plus = {
@@ -80,7 +86,10 @@ pkg.plus = {
   overlayRevision: plusRev,
   generatedAt: new Date().toISOString(),
 };
-if (Array.isArray(pkg.files) && !pkg.files.includes("NOTICE-PLUS.md")) pkg.files.push("NOTICE-PLUS.md");
+// Apache-2.0 §4(a)(c)(d)：许可全文与 NOTICE 必须随发行物走。
+for (const extra of ["NOTICE-PLUS.md", "NOTICE-SAFE.txt", "LICENSE-SAFE-APACHE-2.0.txt"]) {
+  if (Array.isArray(pkg.files) && !pkg.files.includes(extra)) pkg.files.push(extra);
+}
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 log(`✓ package.json 重写：${pkg.name}@${pkg.version}  dshTarget=${pkg.dshTarget}`);
 

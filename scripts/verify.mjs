@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { resolveRepo } from "../overlay/edits.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PKG = path.join(ROOT, "dist", "build", "package");
@@ -128,6 +129,60 @@ if (!fs.existsSync(PROFILE_NM)) {
     bad(`入口加载失败：${(e.stderr || e.message).split("\n").slice(0, 6).join("\n")}`);
   }
   fs.rmSync(LT, { recursive: true, force: true });
+}
+
+// ── 7. 在线更新通道指向本仓库 ────────────────────────────────────
+// 这条是「面板里点升级能不能用」的直接判据：插件自己去 GitHub 找 release，
+// 找错仓库就会拉到 community 的包，或者找不到资产。
+console.log("[7] 在线更新通道");
+{
+  const repo = resolveRepo();
+  const slug = `${repo.owner}/${repo.repo}`;
+  const read = (f) => fs.readFileSync(path.join(PKG, f), "utf8");
+  const consts = [
+    ["lib/community.js", /export const REPOSITORY = "([^"]+)"/, "REPOSITORY"],
+    ["lib/update-net.js", /export const SOURCE_REPO = "([^"]+)"/, "SOURCE_REPO"],
+  ];
+  for (const [file, re, label] of consts) {
+    const m = read(file).match(re);
+    if (!m) { bad(`${label} 未找到`); continue; }
+    m[1] === slug ? ok(`${label} = ${m[1]}`) : bad(`${label} = ${m[1]}（应为 ${slug}）`);
+  }
+  // 更新路径上不允许残留旧仓库坐标，否则升级会去拉 community 的包。
+  const leftovers = ["lib/community.js", "lib/update-net.js", "lib/update.js", "lib/update-targets.js"]
+    .filter((f) => read(f).includes("kingcharleslzy-ai/dsh-purge"));
+  leftovers.length === 0 ? ok("更新路径无旧仓库残留") : bad(`旧仓库坐标残留: ${leftovers.join(", ")}`);
+
+  // 资产名必须与 build 产出的 tgz 前缀一致，否则 releases 里永远匹配不到。
+  const pkgJson = JSON.parse(read("package.json"));
+  const asset = `${pkgJson.name}-${pkgJson.version}.tgz`;
+  const tgz = path.join(ROOT, "dist", asset);
+  fs.existsSync(tgz) ? ok(`发行资产名 ${asset}`) : bad(`dist 里没有 ${asset}`);
+
+  // 发行 tag 白名单：不放宽的话，我们自己的 tag 会被过滤掉，
+  // 面板「检查更新」永远显示已是最新——这是在线升级的硬闸门。
+  const upd = read("lib/update.js");
+  const reLine = upd.match(/const FORK_RELEASE_RE = (\/\^[^\n]+\/);/);
+  if (!reLine) bad("FORK_RELEASE_RE 未找到");
+  else {
+    const re = eval(reLine[1]);
+    const tag = `v${pkgJson.version}`;
+    re.test(tag) ? ok(`发行 tag 白名单接受 ${tag}`) : bad(`发行 tag 白名单拒绝 ${tag}`);
+    re.test("v1.7.20") ? ok("发行 tag 白名单仍接受 vX.Y.Z") : bad("vX.Y.Z 被拒");
+    !re.test("v1.7.20-rc.1") ? ok("发行 tag 白名单拒绝预发布") : bad("预发布未被拒");
+  }
+  // 版本比较：plus.N 递增要判成更新，上游大版本要压过任何 plus 小版本。
+  const vs = await import(path.join(PKG, "lib", "update-state.js"));
+  const okNewer = vs.versionIsNewer("1.7.20-plus.2", "1.7.20-plus.1")
+    && vs.versionIsNewer("1.7.21", "1.7.20-plus.9")
+    && !vs.versionIsNewer("1.7.20-plus.1", "1.7.20-plus.1");
+  okNewer ? ok("版本比较：plus.N 递增 / 上游大版本 / 同版不更新") : bad("versionIsNewer 对 plus 版本判定错误");
+
+  // 已安装包身份校验要认得本包名。
+  read("lib/installed-package.js").includes("COMMUNITY_PACKAGE = 'dsh-purge-plus'")
+    ? ok("installed-package 认 dsh-purge-plus") : bad("installed-package 仍只认 community");
+  pkgJson.repository?.url?.includes(slug) ? ok(`package.json repository = ${slug}`)
+    : bad(`package.json repository = ${pkgJson.repository?.url}`);
 }
 
 console.log("");

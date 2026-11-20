@@ -1,0 +1,8 @@
+{
+  "_comment": "本仓库的 GitHub 坐标。构建时写进 package.json 与插件的在线更新通道。",
+  "_note": "owner 确定后只改这一处；scripts/build.mjs 也接受 GITHUB_REPO 环境变量覆盖。",
+  "owner": "OWNER",
+  "repo": "dsh-purge-plus",
+  "assetPrefix": "dsh-purge-plus",
+  "packageName": "dsh-purge-plus"
+}
