@@ -96,6 +96,40 @@ for (const p of r.ours) {
   (already || counts.every((c) => c === 1)) ? ok(`#${p.id} ${targets.length} 文件 · ${verdict}`) : bad(`#${p.id} ${verdict} —— 锚点已漂移`);
 }
 
+// ── 6. 按 DSH 的解析上下文真正加载插件入口 ────────────────────────
+// 构建目录里没有 node_modules，yaml 之类的直接依赖解析不到。
+// DSH 安装后包位于 <profile>/node_modules/<pkg>/，向上能解析到 profile 的依赖。
+// 这里用软链复现那个上下文，确保 cordis 加载时不会 ERR_MODULE_NOT_FOUND。
+console.log("[6] 插件入口加载（DSH 解析上下文）");
+const PROFILE_NM = process.env.DSH_NODE_MODULES
+  || path.join(process.env.HOME || "", ".dsh", "profiles", "desktop", "node_modules");
+if (!fs.existsSync(PROFILE_NM)) {
+  bad(`找不到 profile 的 node_modules: ${PROFILE_NM}（设 DSH_NODE_MODULES 覆盖）`);
+} else {
+  const LT = path.join(ROOT, "dist", "loadtest");
+  fs.rmSync(LT, { recursive: true, force: true });
+  fs.mkdirSync(LT, { recursive: true });
+  fs.symlinkSync(PROFILE_NM, path.join(LT, "node_modules"));
+  fs.cpSync(PKG, path.join(LT, "package"), { recursive: true });
+  const loadProbe = `
+    const m = await import("./lib/index.js");
+    console.log(JSON.stringify({ name: m.name, inject: m.inject, apply: typeof m.apply, exports: Object.keys(m).length }));
+  `;
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", loadProbe], {
+      cwd: path.join(LT, "package"), encoding: "utf8",
+    }));
+    out.name === "dsh-purge-plus" ? ok(`name=${out.name}`) : bad(`name 应为 dsh-purge-plus，实际 ${out.name}`);
+    out.apply === "function" ? ok("apply 可调用") : bad(`apply 类型 ${out.apply}`);
+    Array.isArray(out.inject) && out.inject.includes("systemPrompt") && out.inject.includes("tools")
+      ? ok(`inject=${JSON.stringify(out.inject)}`) : bad(`inject 异常: ${JSON.stringify(out.inject)}`);
+    ok(`具名导出 ${out.exports} 个`);
+  } catch (e) {
+    bad(`入口加载失败：${(e.stderr || e.message).split("\n").slice(0, 6).join("\n")}`);
+  }
+  fs.rmSync(LT, { recursive: true, force: true });
+}
+
 console.log("");
 if (failed) { console.error(`验收失败：${failed} 项`); process.exit(1); }
 console.log("验收通过（本次全程只读，宿主未被修改）。");
