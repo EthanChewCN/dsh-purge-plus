@@ -55,15 +55,21 @@ log(`✓ overlay/files 覆盖完成`);
 fs.copyFileSync(path.join(ROOT, "README.md"), path.join(PKG, "README.md"));
 log(`✓ README.md 用本仓库版本覆盖`);
 
-// 本仓库的维护文档一并随包分发（与 vendor 的 docs 无重名）：
-// PORT-MATRIX 是移植判定，LICENSING 是 Apache-2.0 §4 要求的改动记录。
-for (const f of fs.readdirSync(path.join(ROOT, "docs"))) {
-  if (!f.endsWith(".md")) continue;
-  const dst = path.join(PKG, "docs", f);
-  if (fs.existsSync(dst)) die(`docs/${f} 与 vendor 同名，拒绝覆盖上游文档`);
-  fs.copyFileSync(path.join(ROOT, "docs", f), dst);
+// 本仓库的维护文档**不进发行物**（docs/ 已从仓库与包内一并移除，只在本机保留）。
+// 合规义务不依赖它：Apache-2.0 §4(b) 的逐文件改动记录在 NOTICE-PLUS.md 第 2 节，
+// 随包分发；docs/LICENSING.md 只是同一份记录的扩展清单。
+// 这里做的是反向守卫：万一将来有人把 docs 复制回来，构建直接失败。
+{
+  const localDocs = path.join(ROOT, "docs");
+  if (fs.existsSync(localDocs)) {
+    const names = fs.readdirSync(localDocs).filter((f) => f.endsWith(".md"));
+    const leaked = names.filter((f) => fs.existsSync(path.join(PKG, "docs", f)));
+    if (leaked.length) die(`发行物里出现了本仓库维护文档：${leaked.join(", ")}（docs/ 只在本机保留）`);
+    log(`✓ 本仓库 docs 未随包分发（本机 ${names.length} 个，包内 0 个）`);
+  } else {
+    log(`✓ 本仓库 docs 未随包分发（本机无 docs/，跳过）`);
+  }
 }
-log(`✓ 本仓库 docs 并入（${fs.readdirSync(path.join(ROOT, "docs")).filter((f) => f.endsWith(".md")).length} 个）`);
 
 // ── 3. 应用精确锚点编辑 ───────────────────────────────────────────
 const EDITS = buildEdits(repo);
@@ -1145,6 +1151,39 @@ log(`✓ package.json 重写：${pkg.name}@${pkg.version}  dshTarget=${pkg.dshTa
   }
 }
 
+// ── 4b-2. 重写 presets/**/*.yml 里的插件名 ─────────────────────────
+// 预设的 agent.cordis.yml 里有 `name: dsh-purge-community/redteam/tools`
+// 这种**子路径**引用。宿主按名解析不到该包 → 子条目 `never started` →
+// 整份预设被标 broken。而客户端的模式下拉只列 `broken === undefined` 的行
+// （dsh-client-ui-agent-preset/lib/client.js 的 presetOptions），
+// 于是整份预设从下拉里**彻底消失**——比「装了不生效」更隐蔽：
+// 状态文件写着 registered，界面上什么都没有。
+{
+  const baseName = basePkg.name;
+  if (baseName && baseName !== pkg.name) {
+    const root = path.join(PKG, "presets");
+    let files = 0;
+    let hits = 0;
+    const walk = (dir) => {
+      if (!fs.existsSync(dir)) return;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fp = path.join(dir, entry.name);
+        if (entry.isDirectory()) { walk(fp); continue; }
+        if (!/\.ya?ml$/.test(entry.name)) continue;
+        const text = fs.readFileSync(fp, "utf8");
+        const n = text.split(baseName).length - 1;
+        if (n === 0) continue;
+        fs.writeFileSync(fp, text.split(baseName).join(pkg.name));
+        files += 1;
+        hits += n;
+      }
+    };
+    walk(root);
+    if (hits === 0) log("✓ presets 无上游包名引用");
+    else log(`✓ presets 插件名 ${baseName} → ${pkg.name}（${files} 个文件 / ${hits} 处）`);
+  }
+}
+
 // ── 4c. 重写 client.js 的浏览器模块 id ──────────────────────────────
 // 宿主 dsh-client-modules 的规则：**manifest 的包名就是浏览器模块名**
 // （dsh-client-modules/lib/index.js:150 "The manifest package name identifies
@@ -1241,8 +1280,8 @@ try {
 }
 const r = JSON.parse(probeOut);
 if (r.dup.length) die(`补丁 id 重复: ${r.dup.join(",")}`);
-if (r.ours !== 5) die(`自有补丁数应为 5，实际 ${r.ours}`);
-if (r.total !== 88 + 5) die(`补丁总数应为 93，实际 ${r.total}`);
+if (r.ours !== 7) die(`自有补丁数应为 7，实际 ${r.ours}`);
+if (r.total !== 88 + 7) die(`补丁总数应为 95，实际 ${r.total}`);
 if (r.upstreamMax !== 96) die(`上游补丁最大 id 应为 96，实际 ${r.upstreamMax}（基座可能变了，需复核 PORT-MATRIX）`);
 log(`✓ 补丁表 ${r.total} 条（上游 ${r.total - r.ours}，最大 id ${r.upstreamMax} + 自有 ${r.ours} 条 ≥201），id 无重复`);
 

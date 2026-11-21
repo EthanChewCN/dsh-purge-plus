@@ -7,9 +7,9 @@
 Separate the host layer from the model layer: whether the model is willing to answer is one question; how many gates the host puts in front of it is another.
 
 [![Release](https://img.shields.io/github/v/release/EthanChewCN/dsh-purge-plus?label=release&color=6E56CF)](https://github.com/EthanChewCN/dsh-purge-plus/releases)
-[![Patches](https://img.shields.io/badge/host%20patches-93-3B82F6)](docs/PORT-MATRIX-V2.md)
+[![Patches](https://img.shields.io/badge/host%20patches-95-3B82F6)]
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5-22D3EE)](https://github.com/deepseek-ai/deepseek-harness)
-[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)]
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
 Version: see the Release badge above (not hardcoded — every release would otherwise force a doc edit, which forces another release) · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
@@ -54,7 +54,7 @@ It does not change the model, the cloud account, or upload prompts and configura
 ```
 base    dsh-purge Community   MIT         host patches · patch engine · ops layer
 port    dsh-purge safe        Apache-2.0  a branch with a wider capability surface
-result  dsh-purge-plus        variant     93 patches · 11 read-only checks
+result  dsh-purge-plus        variant     95 patches · 11 read-only checks
 ```
 
 This repo is **not** a fork of community and **not** a fork of safe. It treats both upstreams as read-only inputs:
@@ -69,7 +69,7 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 
 | Layer | Content |
 | :--- | :--- |
-| **Host patches** | **93** = 88 upstream + 5 own (id ≥ 201) |
+| **Host patches** | **95** = 88 upstream + 7 own (id ≥ 201) |
 | Own #201 | `PRODUCT_ANALYTICS_DEFAULT_OFF` — product analytics off by default |
 | Own #202 | `PRODUCT_TELEMETRY_OTEL_NOOP` — product telemetry OTLP exporter becomes a no-op |
 | Own #203 | `SESSION_TELEMETRY_OTEL_DISABLED` — session telemetry defaults to `DISABLED` |
@@ -114,7 +114,7 @@ Conversely, three things in safe are worth porting on their own merits. We judge
 - already stronger on the base → skip (`#9` rewrites approval `decide()` to allow outright, which is more thorough than a runtime downgrade);
 - conflicts with the host contract → skip (`#89` moves the system prompt into a `system` field **no provider reads**, i.e. it drops the prompt).
 
-The per-item verdicts, source evidence, and **11 corrections to earlier analysis** are all in **[docs/PORT-MATRIX-V2.md](docs/PORT-MATRIX-V2.md)** — that is the core document of this repo.
+The per-item verdicts and source evidence (including **11 corrections to earlier analysis**) are kept as development-time records and are **not published with this repo**; the README states the conclusions and the reproducible entry points only.
 
 ### Why not a plain fork
 
@@ -193,7 +193,7 @@ pnpm remove dsh-purge-plus                                   # remove the plugin
 
 **Why the two inline regexes get their own row**: widening only `FORK_RELEASE_RE` in `update.js` makes the release list appear, but clicking Install throws "only stable releases can be installed" — because `community.js` carries two more hard-coded `/^v\d+\.\d+\.\d+$/`. This was found by running it, not by reading it.
 
-Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · `SHA256SUMS.txt` in the same release · default branch `master` · release must not be a draft or prerelease. Full procedure and troubleshooting in **[docs/RELEASE.md](docs/RELEASE.md)**.
+Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · `SHA256SUMS.txt` in the same release · default branch `master` · release must not be a draft or prerelease. Full procedure and troubleshooting in **RELEASE.md**.
 
 > The updater hits `api.github.com` anonymously: 60 requests/hour/IP. On rate limit it degrades to `releases.atom`.
 
@@ -214,7 +214,7 @@ Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · 
 
 "Exactly N hits" is a hard constraint: 0 hits means the anchor rotted after a host upgrade; ≥2 means it would patch the wrong place. Both fail the build.
 
-See **[docs/UPSTREAM.md](docs/UPSTREAM.md)**.
+See **UPSTREAM.md**.
 
 ---
 
@@ -227,7 +227,7 @@ node scripts/verify.mjs
 | # | Check | A failure means |
 | :--- | :--- | :--- |
 | 1 | Patch table / fence / entry import | package structure broken |
-| 2 | 93 patches, 5 own, no duplicate ids | patch table corrupted |
+| 2 | 95 patches, 7 own, no duplicate ids | patch table corrupted |
 | 3 | Real host `--status` locates the `@deepseek-ai` root | host path moved |
 | 4 | The 5 own patches appear in status | patches not wired into the index |
 | 5 | Each own patch's anchor hits exactly once on the host | anchor stale after upgrade |
@@ -253,11 +253,9 @@ overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         11 read-only checks
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify
-docs/PORT-MATRIX-V2.md     exhaustive diff + verdicts + 11 corrections
-docs/COMPAT.md             host compatibility report
-docs/UPSTREAM.md           maintenance handbook
-docs/LICENSING.md          license and attribution compliance
-docs/RELEASE.md            release procedure and troubleshooting
+( `docs/` holds development-time maintenance notes: port verdicts, host compatibility
+  report, release handbook, compliance checklist. Local only — not in the public repo,
+  not shipped in the package. See `/docs/` in .gitignore. )
 ```
 
 ---
@@ -273,7 +271,7 @@ This repo is an **independent variant**. It is not affiliated with, and not endo
 | redteam module | MIT | keep the copyright notice |
 | historical upstream `dsh-purge` 1.1.71 | MIT | inherited via community's NOTICE |
 
-The list of files that must never be deleted, the Apache-2.0 §4(b) per-file change record, and the five items to re-check after each upgrade are in **[docs/LICENSING.md](docs/LICENSING.md)**.
+The Apache-2.0 §4(b) **per-file change record** ships inside the package as section 2 of `NOTICE-PLUS.md`; the must-never-delete list and the five post-upgrade checks are kept as development-time records and are not published with this repo.
 
 ---
 

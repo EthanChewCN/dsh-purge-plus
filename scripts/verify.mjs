@@ -2,7 +2,7 @@
 // [dsh-purge-plus] 验收：只读地证明构建物可用，不写宿主、不改任何文件。
 //
 //   1. 包能 import（补丁表 / 围栏 / 入口）
-//   2. 补丁表不变式：93 条、自有 5 条 ≥201、id 无重复
+//   2. 补丁表不变式：95 条、自有 7 条 ≥201、id 无重复
 //   3. 真实宿主上 --status 能定位 @deepseek-ai 根（DSH_SURFACE=desktop）
 //   4. 自有 5 条出现在状态里（pending/applied/drifted 均可，不能消失）
 //   5. 锚点预演：每个自有补丁的 pattern 在宿主文件里的命中次数
@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import { resolveRepo } from "../overlay/edits.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -53,10 +54,58 @@ try {
 
 // ── 2. 不变式 ───────────────────────────────────────────────────
 console.log("[2] 补丁表不变式");
-r.total === 93 ? ok(`总数 ${r.total}`) : bad(`总数应为 93，实际 ${r.total}`);
-r.ours.length === 5 ? ok(`自有 ${r.ours.length} 条（≥201）`) : bad(`自有应为 5，实际 ${r.ours.length}`);
+r.total === 95 ? ok(`总数 ${r.total}`) : bad(`总数应为 95，实际 ${r.total}`);
+r.ours.length === 7 ? ok(`自有 ${r.ours.length} 条（≥201）`) : bad(`自有应为 7，实际 ${r.ours.length}`);
 r.dup.length === 0 ? ok("id 无重复") : bad(`id 重复: ${r.dup}`);
 r.fence === "function" ? ok("installSubagentFence 已导出") : bad(`围栏导出类型 ${r.fence}`);
+
+// ── 2b. 预设模板里的插件名 ──────────────────────────────────────
+// 预设的 agent.cordis.yml 若仍写上游包名（如 dsh-purge-community/redteam/tools），
+// 宿主解析不到该子条目 → 预设被标 broken → 客户端模式下拉把 broken 行整个滤掉，
+// 于是「红队模式」在界面上凭空消失。这里把这件事钉死在构建验收里。
+console.log("[2b] 预设模板插件名");
+{
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
+  const selfName = pkgJson.name;
+  const presetRoot = path.join(PKG, "presets");
+  const yamls = [];
+  const walk = (dir) => {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fp = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(fp);
+      else if (/\.ya?ml$/.test(entry.name)) yamls.push(fp);
+    }
+  };
+  walk(presetRoot);
+  yamls.length > 0 ? ok(`预设模板 ${yamls.length} 份`) : bad("presets/ 下没有 yml 模板");
+
+  const foreign = [];
+  for (const fp of yamls) {
+    const text = fs.readFileSync(fp, "utf8");
+    for (const line of text.split("\n")) {
+      const m = /^\s*name:\s*['"]?([A-Za-z0-9@._/-]+)['"]?\s*$/.exec(line);
+      if (!m) continue;
+      const name = m[1];
+      if (name.startsWith("./") || name.startsWith("cordis:") || name.startsWith("@")) continue;
+      const pkgPart = name.startsWith("@") ? name.split("/").slice(0, 2).join("/") : name.split("/")[0];
+      if (pkgPart !== selfName) foreign.push(`${path.relative(PKG, fp)}: ${name}`);
+    }
+  }
+  foreign.length === 0
+    ? ok(`没有指向其他包名的插件行（全部解析到 ${selfName}）`)
+    : bad(`预设里有解析不到的插件名：${foreign.join(" · ")}`);
+
+  // 红队预设必须真的引用本包的 tools 子路径，否则等于没接上工具面。
+  const redteamYml = yamls.find((fp) => fp.endsWith(path.join("redteam", "agent.cordis.yml")));
+  if (!redteamYml) bad("找不到 presets/redteam/agent.cordis.yml");
+  else {
+    const text = fs.readFileSync(redteamYml, "utf8");
+    text.includes(`${selfName}/redteam/tools`)
+      ? ok(`红队预设引用 ${selfName}/redteam/tools`)
+      : bad(`红队预设没有引用 ${selfName}/redteam/tools`);
+  }
+}
 
 // ── 3. 宿主定位 ─────────────────────────────────────────────────
 console.log("[3] 真实宿主 --status");
@@ -1019,6 +1068,48 @@ console.log("\n[23] P20/P21 报告文档视图 · 会话关系图 · 字段级�
   /0x1f && got\.buf\[1\] === 0x8b/.test(core)
     ? ok("nuclei：先验 gzip 魔数再解压")
     : bad("nuclei：没有 gzip 魔数校验（200 + HTML 会被当模板包）");
+}
+
+// ── 24. 维护文档只在本机：既不进仓库，也不进发行物 ────────────────
+// 文档（移植判定 / 审计报告 / 发布手册 / 合规清单）是开发期材料。它们含本机绝对
+// 路径与内部推理，不该出现在公开仓库；构建脚本也因此不再把 docs 复制进包。
+// 这三条是**回归守卫**：将来谁把 docs 加回 git 或复制回包，验收立刻红。
+console.log("[24] 维护文档只在本机");
+{
+  const localDocs = path.join(ROOT, "docs");
+  const localMd = fs.existsSync(localDocs)
+    ? fs.readdirSync(localDocs).filter((f) => f.endsWith(".md"))
+    : [];
+
+  /* 24.1 git 索引里不得有 docs/ 下的任何文件 */
+  let tracked = null;
+  try {
+    tracked = execFileSync("git", ["ls-files", "docs"], { cwd: ROOT, encoding: "utf8" });
+  } catch { tracked = null; }
+  if (tracked === null) {
+    console.log("  · 不是 git 工作区，跳过索引检查");
+  } else if (tracked.trim() === "") {
+    ok(`docs/ 未被 git 跟踪（本机 ${localMd.length} 个 md 仍在）`);
+  } else {
+    bad(`docs/ 又被加进 git 了：${tracked.trim().split("\n").slice(0, 3).join(", ")}…`);
+  }
+
+  /* 24.2 .gitignore 必须钉住 /docs/，否则下次 git add -A 又会带进来 */
+  const gi = fs.readFileSync(path.join(ROOT, ".gitignore"), "utf8");
+  /^\/docs\/$/m.test(gi)
+    ? ok(".gitignore 钉住 /docs/")
+    : bad(".gitignore 缺 /docs/ —— git add -A 会把维护文档重新加进仓库");
+
+  /* 24.3 包内不得出现与本机文档同字节的文件（按 sha256 精确比对，不靠文件名） */
+  const pkgDocs = path.join(PKG, "docs");
+  const hash = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
+  const ours = new Set(localMd.map((f) => hash(path.join(localDocs, f))));
+  const leaked = fs.existsSync(pkgDocs)
+    ? fs.readdirSync(pkgDocs).filter((f) => f.endsWith(".md") && ours.has(hash(path.join(pkgDocs, f))))
+    : [];
+  leaked.length === 0
+    ? ok(`发行物不含本仓库维护文档（包内 docs ${fs.existsSync(pkgDocs) ? fs.readdirSync(pkgDocs).length : 0} 个文件，均来自上游）`)
+    : bad(`发行物里出现了本仓库维护文档：${leaked.join(", ")}`);
 }
 
 console.log("");

@@ -7,9 +7,9 @@
 把「宿主层」和「模型层」分开看：模型愿不愿意答是一件事，宿主在它前面加了多少道闸是另一件事。
 
 [![Release](https://img.shields.io/github/v/release/EthanChewCN/dsh-purge-plus?label=release&color=6E56CF)](https://github.com/EthanChewCN/dsh-purge-plus/releases)
-[![Patches](https://img.shields.io/badge/宿主补丁-93-3B82F6)](docs/PORT-MATRIX-V2.md)
+[![Patches](https://img.shields.io/badge/宿主补丁-95-3B82F6)]
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5-22D3EE)](https://github.com/deepseek-ai/deepseek-harness)
-[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](docs/LICENSING.md)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)]
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
 
 当前版本见上方 Release 徽章（不写死：每发一版都要改文档，改完文档又要再发一版）· 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
@@ -54,7 +54,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 ```
 基座   dsh-purge Community   MIT         宿主补丁 · 补丁引擎 · 运维层
 移植   dsh-purge safe        Apache-2.0  能力面更宽的一条支线
-结果   dsh-purge-plus        独立变体     93 条补丁 · 11 组只读验收
+结果   dsh-purge-plus        独立变体     95 条补丁 · 11 组只读验收
 ```
 
 本仓库**不是** community 的 fork，也**不是** safe 的 fork。它把两个上游都当作只读输入：
@@ -69,7 +69,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 
 | 层 | 内容 |
 | :--- | :--- |
-| **宿主补丁** | **93 条** = 上游 88 + 自有 5（id ≥ 201） |
+| **宿主补丁** | **95 条** = 上游 88 + 自有 7（id ≥ 201） |
 | 自有 #201 | `PRODUCT_ANALYTICS_DEFAULT_OFF` —— 产品埋点默认关 |
 | 自有 #202 | `PRODUCT_TELEMETRY_OTEL_NOOP` —— 产品遥测 OTLP 导出器变空实现 |
 | 自有 #203 | `SESSION_TELEMETRY_OTEL_DISABLED` —— 会话遥测默认 `DISABLED` |
@@ -114,7 +114,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 - 基座已有更强实现的 → 不搬（`#9` 已把审批 `decide()` 直接改成放行，比 safe 的运行时降级更彻底）；
 - 与宿主契约冲突的 → 不搬（`#89` 把系统提示词塞进一个**没有 provider 会读**的 `system` 字段，等于丢提示词）。
 
-逐条判定、源码证据、以及**上轮判断的 11 处勘误**，全部写在 **[docs/PORT-MATRIX-V2.md](docs/PORT-MATRIX-V2.md)** —— 那是本仓库的核心文档。
+逐条判定与源码证据（含**上轮判断的 11 处勘误**）在开发期逐条留证，**不随仓库发布**；README 只给结论与可复现的入口。
 
 ### 为什么不是简单 fork
 
@@ -193,7 +193,7 @@ pnpm remove dsh-purge-plus                                   # 摘掉插件
 
 **为什么「两处内联正则」单列**：只放宽 `update.js` 的 `FORK_RELEASE_RE` 时，发行列表能列出来，但点「安装」会抛「只安装正式发布版本」—— 因为 `community.js` 里还有两个硬编码的 `/^v\d+\.\d+\.\d+$/`。这是实测踩到的，不是推测。
 
-发布约定：tag `v<version>` · 资产 `dsh-purge-plus-<version>.tgz` · 同 release 下 `SHA256SUMS.txt` · 默认分支 `master` · release 不能是 draft / prerelease。完整流程与排错表见 **[docs/RELEASE.md](docs/RELEASE.md)**。
+发布约定：tag `v<version>` · 资产 `dsh-purge-plus-<version>.tgz` · 同 release 下 `SHA256SUMS.txt` · 默认分支 `master` · release 不能是 draft / prerelease。完整流程与排错表见 **RELEASE.md**。
 
 > 更新器默认匿名访问 `api.github.com`，配额 60 次/小时/IP。撞限流会自动降级到 `releases.atom`。
 
@@ -214,7 +214,7 @@ pnpm remove dsh-purge-plus                                   # 摘掉插件
 
 锚点「恰好命中 N 次」是硬约束：命中 0 次 = 宿主升级后锚点烂了；命中 ≥2 次 = 会打歪。两种情况都直接失败。
 
-详见 **[docs/UPSTREAM.md](docs/UPSTREAM.md)**。
+详见 **UPSTREAM.md**。
 
 ---
 
@@ -227,7 +227,7 @@ node scripts/verify.mjs
 | # | 检查 | 失败意味着 |
 | :--- | :--- | :--- |
 | 1 | 补丁表 / 围栏 / 入口可 import | 包结构坏了 |
-| 2 | 93 条、自有 5 条、id 无重复 | 补丁表被改坏 |
+| 2 | 95 条、自有 7 条、id 无重复 | 补丁表被改坏 |
 | 3 | 真实宿主 `--status` 能定位 `@deepseek-ai` 根 | 宿主路径变了 |
 | 4 | 自有 5 条出现在状态里 | 补丁没接进汇总入口 |
 | 5 | 每条自有补丁的锚点在宿主上恰好命中 1 次 | 宿主升级后锚点失效 |
@@ -253,11 +253,8 @@ overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         11 组只读验收
 scripts/sync-upstream.sh   上游升级：换 vendor → 重放 → 重建 → 验收
-docs/PORT-MATRIX-V2.md     穷尽差分 + 逐条判定 + 11 处勘误
-docs/COMPAT.md             宿主兼容性验证报告
-docs/UPSTREAM.md           维护手册
-docs/LICENSING.md          许可与署名合规清单
-docs/RELEASE.md            发布流程与排错
+（`docs/` 为开发期维护文档：移植判定、宿主兼容报告、发布手册、许可与署名合规清单。
+ 只在本机保留，不进公开仓库，也不随发行物分发 —— 见 .gitignore 的 /docs/。）
 ```
 
 ---
@@ -273,7 +270,7 @@ docs/RELEASE.md            发布流程与排错
 | redteam 模块 | MIT | 保留版权声明 |
 | 历史上游 `dsh-purge` 1.1.71 | MIT | 经 community 的 NOTICE 继承 |
 
-绝不能删的文件清单、Apache-2.0 §4(b) 的逐文件改动记录、每次升级后要复查的五项，见 **[docs/LICENSING.md](docs/LICENSING.md)**。
+Apache-2.0 §4(b) 的**逐文件改动记录**在包内 `NOTICE-PLUS.md` 第 2 节（随发行物分发）；绝不能删的文件清单与每次升级后要复查的五项，在开发期维护文档中留档，不随仓库发布。
 
 ---
 

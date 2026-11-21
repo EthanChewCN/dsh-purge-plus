@@ -21,11 +21,11 @@
 它自身又是 `YuJunZhiXue/dsh-purge` **1.1.71** 的独立维护分支（原作者 小杨）。
 该仓库的 `NOTICE.md` 与 `docs/upstream/` 保留了这条上游链，本仓库随副本一并继承。
 
-## 2. 移植来源：dsh-purge-safe 2.0.0
+## 2. 移植来源：dsh-purge-safe 2.0.0 / 2.0.1
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `https://github.com/CallMeGuLab/dsh-purge-safe`（公开），tag `v2.0.0` |
+| 仓库 | `https://github.com/CallMeGuLab/dsh-purge-safe`（公开），tag `v2.0.0`、`v2.0.1` |
 | 许可 | **Apache License 2.0**，Copyright 2026 CallMeGuLab |
 | 本仓库位置 | `vendor/safe/` — 原样副本，仅用于比对与升级追踪 |
 | 原始许可全文 | `LICENSE-SAFE-APACHE-2.0.txt`（随发行物分发） |
@@ -49,8 +49,18 @@
 | `lib/patches/overlay.mjs` #203 | safe `core.js` #95 | 语义相同 |
 | `lib/patches/overlay.mjs` #205 | safe `core.js` #52 的硬移除部分 | **裁剪**：只取「注册点短路 + prepare 首行返回」，默认值部分由 community `#52` 负责，不重复 |
 | `lib/patches/overlay.mjs` #206 | safe `core.js` #92 的第 3、4 条替换 | **裁剪**：只取「子代理继承父权限档」；前半段（spawn 时挂 assemble）由 community `#74` 覆盖，不重复 |
+| `lib/patches/overlay.mjs` #207 | safe **2.0.1** `core.js` #97 | 语义相同（冷路径沿用 recorded 预设），marker 前缀改为 `dsh-purge-plus`，注释改写 |
+| `lib/patches/overlay.mjs` #208 | safe **2.0.1** `core.js` #98 | 语义相同（活路径沿用 recorded 预设） |
 | `overlay/snippets/artifacts-tab.js` | safe `lib/redteam/client.js:592-605, 11463-11545` | **改写**：`SecretText` / `CredentialList` / `AccessList` / `ArtifactsTab` 四个组件，只复用本基座已有的 CSS 类，不引入 safe 的 16 个零引用 css |
 | `lib/subagent-fence.js` | safe `lib/tool-gate.js` 的 `denyDelegation` | **裁剪**：只保留「子代理禁再派活」，去掉与 community `#9`/`#59` 重复的降级逻辑 |
+
+### 未移植：safe 2.0.1 `#99`（`lib/types/agent.js` 那份 `claim()`）
+
+实测该文件在本机**不可达**：`package.json` 的 `exports` 里 `./types` 指向 `lib/types/types.js`（只有几个常量），
+没有任何 `exports` 或运行时代码指向 `lib/types/agent.js`；它只是打包时留下的源文件副本，
+而真正被加载的 `lib/index.js` 已经把同一份代码以 `//#region lib/types/agent.js` 内联在第 28 行起。
+也就是说补它零收益，且要往 `targetFiles()` 里新加一个文件键才做得到。
+若将来宿主把 `./types` 指回 `lib/types/index.js`，这条才需要补 —— 届时锚点也要重新核对。
 
 ### 已回退：`#204`（原 safe `#96`）
 
@@ -89,7 +99,7 @@ community 的 redteam 模块派生自第三方，本仓库随副本一并继承�
 
 ## 5. 未移植的部分及原因
 
-见 `docs/PORT-MATRIX.md`。简言之：safe 的 `subagent-control.js`（审批接管）与 `tool-gate.js` 主体（审核降级），
+移植判定逐条留档在开发期维护文档里（不随本发行物分发）。简言之：safe 的 `subagent-control.js`（审批接管）与 `tool-gate.js` 主体（审核降级），
 在 community 里已由**源码补丁** `#9` / `#59` 以更彻底的方式实现，重复移植会互相覆盖。
 这不是取舍，是重复。
 
