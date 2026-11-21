@@ -156,4 +156,99 @@ export const OVERLAY_PATCHES = [
     ],
     markers: ["[dsh-purge-plus] subagent inherits parent access"],
   },
+
+  // ── 207 复用空白会话时沿用日志里记下的预设（冷路径）────────────────
+  // 来源 safe v2.0.1 #97（Apache-2.0，署名见 NOTICE-PLUS.md）。
+  //
+  // 故障链（下拉里选「红队模式」→ 发一句话 → 变回「标准模式」）：
+  //   1. select() 把 agent-preset/selected: redteam 写进会话日志，投影变 redteam；
+  //   2. sessions.create({ sessionId }) 没带 agentPreset（新建会话按钮 / 工作区重连 /
+  //      connectBlank 复用同一空白都属这一类）→ composeAgent(undefined) → 部署默认；
+  //   3. reuseLive() / reuseSetup() 发现 target(standard) !== current(redteam)，
+  //      补一条 agent-preset/selected: standard —— 刚选的红队被静默抹掉。
+  //
+  // 会话日志里那条 redteam 是**已经记下的意图**，请求没点名预设时不该覆盖它。
+  // restoreBlank() 自己就是按「沿用 recorded」写的，claim() 与它不一致。
+  //
+  // 锚点实测：dsh-api-session-controller/lib/index.js:349（恰好 1 次命中，4 tab）
+  // 只在本机名册确实认得该预设时才沿用 —— 插件卸载留下的墓碑 id 走原默认路径，
+  // 不把会话创建打挂。
+  {
+    id: 207,
+    name: "BLANK_REUSE_KEEPS_RECORDED_PRESET",
+    layer: "代码",
+    layer_en: "Code",
+    desc: "复用空白会话时沿用日志里记下的预设，不再被部署默认静默覆盖 / reusing a blank session keeps its recorded preset",
+    file: ["api-session-controller"],
+    optional: true,
+    skipIfMarked: true,
+    replacements: [
+      {
+        expect: 1,
+        pattern:
+          "\t\t\t\treusable = request.reusable(sessionId) && !observed.events.some((event) => event.type === \"turn/start\");\n",
+        replace:
+          "\t\t\t\treusable = request.reusable(sessionId) && !observed.events.some((event) => event.type === \"turn/start\");\n" +
+          "\t\t\t\t/* [dsh-purge-plus] 请求没点名预设、且这条空白会话日志里已经记了预设 —— 沿用记下的那个。 */\n" +
+          "\t\t\t\tif (request.agentPreset === void 0 && this.ctx.get(\"agentPresets\") !== void 0) {\n" +
+          "\t\t\t\t\tlet recorded = observed.projections?.values?.agentPreset;\n" +
+          "\t\t\t\t\tif (typeof recorded !== \"string\" || recorded.length === 0) {\n" +
+          "\t\t\t\t\t\tfor (const event of observed.events) if (event.type === \"agent-preset/selected\") recorded = event.data.agentPreset;\n" +
+          "\t\t\t\t\t}\n" +
+          "\t\t\t\t\tif (typeof recorded === \"string\" && recorded.length > 0) {\n" +
+          "\t\t\t\t\t\tlet known = false;\n" +
+          "\t\t\t\t\t\ttry { known = (await this.ctx.get(\"agentPresets\").resolve(recorded)).id === recorded; } catch { known = false; }\n" +
+          "\t\t\t\t\t\tif (known) request = { ...request, agentPreset: recorded };\n" +
+          "\t\t\t\t\t}\n" +
+          "\t\t\t\t}\n",
+      },
+    ],
+    markers: ["[dsh-purge-plus] 请求没点名预设、且这条空白会话日志里已经记了预设"],
+  },
+
+  // ── 208 活着的空白会话同样沿用已记下的预设（活路径）────────────────
+  // 来源 safe v2.0.1 #98（Apache-2.0，署名见 NOTICE-PLUS.md）。
+  //
+  // 207 只补了冷路径（会话还没活起来，走 observeSession → resume）。
+  // 活着的会话走 claim() 开头的 `if (live !== void 0)` 分支，直接
+  // composeAgent(request.agentPreset) —— 请求没点名就解析成部署默认，
+  // 随后 reuseLive() 判 target(standard) !== current(redteam)，补一条 standard。
+  //
+  // 两条路必须都补：只补冷路径时，「刚选完模式、会话还活着」这个最常见的
+  // 场景仍然会被抹掉。
+  //
+  // 锚点实测：同文件 :326-328（三行整体恰好 1 次命中，2 tab）
+  {
+    id: 208,
+    name: "LIVE_BLANK_REUSE_KEEPS_RECORDED_PRESET",
+    layer: "代码",
+    layer_en: "Code",
+    desc: "活着的空白会话同样沿用已记下的预设，堵住 reuseLive() 把红队写回标准 / a live blank session also keeps its recorded preset",
+    file: ["api-session-controller"],
+    optional: true,
+    skipIfMarked: true,
+    replacements: [
+      {
+        expect: 1,
+        pattern:
+          "\t\tif (live !== void 0) {\n" +
+          "\t\t\tif (live.session.header.cwd !== request.cwd) throw new ApiSessionCwdConflict(live.id, request.cwd, live.session.header.cwd);\n" +
+          "\t\t\tconst composition = await this.composeAgent(request.agentPreset);\n",
+        replace:
+          "\t\tif (live !== void 0) {\n" +
+          "\t\t\tif (live.session.header.cwd !== request.cwd) throw new ApiSessionCwdConflict(live.id, request.cwd, live.session.header.cwd);\n" +
+          "\t\t\t/* [dsh-purge-plus] 活着的空白会话也要沿用已记下的预设。 */\n" +
+          "\t\t\tif (request.agentPreset === void 0 && this.ctx.get(\"agentPresets\") !== void 0) {\n" +
+          "\t\t\t\tconst recorded = this.presetForSession(live.session);\n" +
+          "\t\t\t\tif (typeof recorded === \"string\" && recorded.length > 0) {\n" +
+          "\t\t\t\t\tlet known = false;\n" +
+          "\t\t\t\t\ttry { known = (await this.ctx.get(\"agentPresets\").resolve(recorded)).id === recorded; } catch { known = false; }\n" +
+          "\t\t\t\t\tif (known) request = { ...request, agentPreset: recorded };\n" +
+          "\t\t\t\t}\n" +
+          "\t\t\t}\n" +
+          "\t\t\tconst composition = await this.composeAgent(request.agentPreset);\n",
+      },
+    ],
+    markers: ["[dsh-purge-plus] 活着的空白会话也要沿用已记下的预设"],
+  },
 ];
