@@ -1074,6 +1074,22 @@ const SNIPPETS = [
     anchor: '    else if (st.tab === "artifacts")\n      body = h2(ArtifactsTab, { engagement: eng, refreshKey });\n',
     text: '    else if (st.tab === "evidence")\n      body = h2(EvidenceTab, { engagement: eng, refreshKey });\n',
   },
+
+  // ── P26：待办角标（右下角常驻胶囊）────────────────────────────────
+  // 只进面板产物：独立窗口那份整个窗口就是演练台，没有 shell.overlay 可挂，
+  // 也没有「我在别的页面看不见」的问题。
+  // 挂载点选 shell.overlay 而不是某个页签内部：角标的价值全在「不在这页也看得见」。
+  {
+    file: "client.js", dialect: "panel", src: "attention-badge.js",
+    what: "待办角标组件", mode: "before",
+    anchor: "function PanelOverlays() {\n",
+  },
+  {
+    file: "client.js", dialect: "panel", mode: "after",
+    what: "待办角标挂载",
+    anchor: "    h(EnvAdaptSendGate),\n",
+    text: "    h(AttentionBadge, null),\n",
+  },
 ];
 for (const sn of SNIPPETS) {
   const fp = path.join(PKG, sn.file);

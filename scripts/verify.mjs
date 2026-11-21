@@ -1112,6 +1112,48 @@ console.log("[24] 维护文档只在本机");
     : bad(`发行物里出现了本仓库维护文档：${leaked.join(", ")}`);
 }
 
+// ── 25. 待办角标挂在 shell.overlay，且不自动收口 ────────────────────
+// 角标的价值全在「不在这页也看得见」。挂到页签内部功能测试照样全绿（打开演练台能看见），
+// 只有人在别的页面时才暴露 —— 所以这里断言**挂载点**，不是「组件存在」。
+console.log("[25] 待办角标");
+{
+  const panel = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+  const rt = fs.readFileSync(path.join(PKG, "lib", "redteam", "client.js"), "utf8");
+
+  const fnAt = panel.indexOf("function AttentionBadge()");
+  const ovAt = panel.indexOf("function PanelOverlays()");
+  if (fnAt < 0) bad("面板产物缺 AttentionBadge 组件");
+  else ok("面板产物有 AttentionBadge");
+
+  /* 25.1 挂载点：必须出现在 PanelOverlays 函数体内（shell.overlay 的插槽） */
+  if (fnAt >= 0 && ovAt > fnAt) {
+    const overlays = panel.slice(ovAt, panel.indexOf("function apply(ctx)", ovAt));
+    overlays.includes("h(AttentionBadge")
+      ? ok("挂在 PanelOverlays（shell.overlay 常驻，不随页签切换消失）")
+      : bad("AttentionBadge 没挂进 PanelOverlays —— 只有打开某个页签时才看得见");
+    overlays.includes("h(EnvAdaptSendGate)")
+      ? ok("PanelOverlays 原有内容未被替换")
+      : bad("PanelOverlays 原有内容被覆盖了");
+  }
+
+  /* 25.2 不自动收口：收口是人的判断，自动 ack 会把「我还没答」变成「已处理」 */
+  if (fnAt >= 0) {
+    const body = panel.slice(fnAt, ovAt > fnAt ? ovAt : fnAt + 12000);
+    body.includes("attentionAck")
+      ? bad("角标里出现 attentionAck —— 读了就收口等于替人做决定")
+      : ok("角标不自动收口");
+    body.includes('op: "attention"')
+      ? ok("角标读 attention op")
+      : bad("角标没读 attention op");
+  }
+
+  /* 25.3 跳页事件两端都在：只有一端 = 按钮点了没反应 */
+  const listeners = [rt, panel].filter((t) => t.includes("addEventListener('dsh-purge-plus:goto-tab'")).length;
+  listeners === 2
+    ? ok("跳页事件两端都在（独立窗口 + 面板内嵌）")
+    : bad(`跳页事件只有 ${listeners}/2 端在监听 —— 「去智能体页」会点了没反应`);
+}
+
 console.log("");
 if (failed) { console.error(`验收失败：${failed} 项`); process.exit(1); }
 console.log("验收通过（本次全程只读，宿主未被修改）。");

@@ -27,6 +27,18 @@
       /* 点分组：当前页已在本组就不跳，否则落到本组第一页 ——
          否则点一下「成果与报告」会把正在看的漏洞战果甩掉。 */
       const activateGroup = (g) => goTab(g.tabs.indexOf(normalizedTab) >= 0 ? normalizedTab : g.tabs[0])
+      /* [dsh-purge-plus] P26 外部入口跳页：待办角标挂在 shell.overlay，拿不到这里的
+         setUI / setRefreshKey，用一次自定义事件把「去智能体页」接过来。
+         刻意不用 window 全局函数：面板内嵌与独立窗口是两个 dock 实例，全局函数会被
+         后挂载的那个覆盖，点一下跳到看不见的那个里去。 */
+      React.useEffect(() => {
+        const onGo = (event) => {
+          const tab = event && event.detail
+          if (typeof tab === 'string' && tab) goTab(tab)
+        }
+        window.addEventListener('dsh-purge-plus:goto-tab', onGo)
+        return () => window.removeEventListener('dsh-purge-plus:goto-tab', onGo)
+      }, [eng, digest])
       /* 分组行是 tablist，方向键/Home/End 要能走。缺了这段，键盘用户只能 Tab 一路穿过去。 */
       const navigateGroupKey = (event, index) => {
         let next
