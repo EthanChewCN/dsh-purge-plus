@@ -21,11 +21,11 @@
 它自身又是 `YuJunZhiXue/dsh-purge` **1.1.71** 的独立维护分支（原作者 小杨）。
 该仓库的 `NOTICE.md` 与 `docs/upstream/` 保留了这条上游链，本仓库随副本一并继承。
 
-## 2. 移植来源：dsh-purge-safe 2.0.0 / 2.0.1
+## 2. 移植来源：dsh-purge-safe 2.0.0（基线）/ 2.0.1 / 2.0.2
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `https://github.com/CallMeGuLab/dsh-purge-safe`（公开），tag `v2.0.0`、`v2.0.1` |
+| 仓库 | `https://github.com/CallMeGuLab/dsh-purge-safe`（公开），tag `v2.0.0`、`v2.0.1`、`v2.0.2` |
 | 许可 | **Apache License 2.0**，Copyright 2026 CallMeGuLab |
 | 本仓库位置 | `vendor/safe/` — 原样副本，仅用于比对与升级追踪 |
 | 原始许可全文 | `LICENSE-SAFE-APACHE-2.0.txt`（随发行物分发） |
@@ -54,6 +54,19 @@
 | `overlay/snippets/artifacts-tab.js` | safe `lib/redteam/client.js:592-605, 11463-11545` | **改写**：`SecretText` / `CredentialList` / `AccessList` / `ArtifactsTab` 四个组件，只复用本基座已有的 CSS 类，不引入 safe 的 16 个零引用 css |
 | `lib/subagent-fence.js` | safe `lib/tool-gate.js` 的 `denyDelegation` | **裁剪**：只保留「子代理禁再派活」，去掉与 community `#9`/`#59` 重复的降级逻辑 |
 
+### 版本口径（2026-11-23 复核）
+
+| 版本 | 文件数 | 补丁条数 | 性质 |
+| :--- | ---: | ---: | :--- |
+| v2.0.0（本仓库 vendor 基线） | 153 | **59** | — |
+| v2.0.1 | 160 | **62**（+97/98/99） | 功能版：7 个新模块 + 25 个修改 |
+| v2.0.2 | 160 | **64**（+100/101） | **仅兼容版**：把 `dshTarget` 从 `0.2.2-rc.3` 改成 `rc.5`，真逻辑改动只落在 `core.js` / `net-scope.js` 两处 |
+
+本仓库**有意停在 2.0.0 基线**：`vendor/safe` 不参与构建（`scripts/build.mjs` 全文不引用它），
+它只是比对与署名的来源。上游新版与基线的差异可用
+`node scripts/check-vendor-drift.mjs safe <safe 源码目录>` 随时复核
+（2026-11-23 实测 2.0.0 → 2.0.2：漂移 32 / 新增 7 / 缺失 0）。
+
 ### 未移植：safe 2.0.1 `#99`（`lib/types/agent.js` 那份 `claim()`）
 
 实测该文件在本机**不可达**：`package.json` 的 `exports` 里 `./types` 指向 `lib/types/types.js`（只有几个常量），
@@ -74,7 +87,7 @@
 |---|---|
 | `lib/net-scope.js` 的 `installRegionGate`（`net-scope.js:625-669`） | 反向能力：命中地域/银行判定就往会话写 `DENIAL` 并吞掉整轮，与本项目目的相反 |
 | `lib/update.js` | `const REPO = ""`（`update.js:12`），升级通道整体失效；本仓库用 community 的更新子系统 |
-| 16 个 `.css` | 全仓零引用，死资产 |
+| 16 个 `.css` | **不是死资产**：`scripts/build-client.mjs:62-66` 把它们逐个读进 `PURGE_CSS` 常量并嵌入 safe 的 client.js。不移植的真实原因是样式体系与 DOM 结构不同（community 面板没有对应的类名与层级），搬过来是零命中的样式表 |
 | `#89/#90/#91` | 与宿主契约冲突：`#89` 把系统提示词塞进无人读取的 `request.system` 字段；`#90/#91` 读 string 型 `globalThis.__dshPurgeHungPrompt`，而本基座定义的是 function 型，打上即静默失效 |
 
 ## 3. 上游的第三方内容（随 community 继承）
@@ -102,6 +115,22 @@ community 的 redteam 模块派生自第三方，本仓库随副本一并继承�
 移植判定逐条留档在开发期维护文档里（不随本发行物分发）。简言之：safe 的 `subagent-control.js`（审批接管）与 `tool-gate.js` 主体（审核降级），
 在 community 里已由**源码补丁** `#9` / `#59` 以更彻底的方式实现，重复移植会互相覆盖。
 这不是取舍，是重复。
+
+### safe 独有面全量对照（2026-11-23 实测，非估计）
+
+`safe` 相对 `community` 独有 **27 个 lib 文件 + 17 个技能**（community 独有技能 0 个）。
+逐个定性如下 —— 「未移植」是结论，理由必须写清，否则下一个人会以为漏了：
+
+| 组 | 文件 | 处理与理由 |
+| :--- | :--- | :--- |
+| 样式 | 16 个 `.css` | **不移植**。它们被 safe 自己的 `build-client.mjs` 读进 `PURGE_CSS` 嵌入其 client.js，不是死资产；但类名与 DOM 层级是 safe 面板的，本仓库基座没有对应结构，搬过来是零命中样式 |
+| 行为锚点 | `lib/anchor.js` | **不移植**。把明文锚点每轮置于 system prompt 尾部（order 10150）压过宿主 delegation；与 community 的 boost 属同类且更强，本仓库不引入第二套 |
+| 预设默认 | `lib/preset-default.js` | **不移植**。safe 专属路径：dispose 时清 `selectedDefault`，2.0.1 用 hold/sweep 修热重载误清。本仓库装配包内 `selectedDefault` **零引用**（实测 grep 无命中），没有这条代码路径可修 |
+| 子代理/工具门 | `lib/subagent-control.js`、`lib/tool-gate.js` | **不移植**。community 的源码补丁 `#9`/`#59` 已覆盖同一语义，重复移植会互相覆盖（见第 5 节） |
+| 演练台能力层 | `bootstrap-runtime.js`、`kev.js`、`slot-state.js`、`team-mode.js` | **未移植**。各需 UI 与状态层配套；本仓库的情报更新是自研的 `store-intel`（KEV + nuclei，带大小/超时/形状校验与原子落盘） |
+| 主题 / 全屏 | `ui-theme.js`、`ui-theme.css`、`ui-fullscreen.js` | **部分自研**。站内全屏在本仓库 overlay 里独立实现（`fullscreen-hook.js`），不依赖 safe 的 288 行 hook |
+| 设置 | `mnemon-settings.js` | **不移植**。safe 自有设置项，基座无对应宿主接口 |
+| 技能 | 17 个 `skills/redteam/*.md` | **不移植**。记账口径不同（safe 用 `score_hit`/`vuln_add`/`tunnel_add`，基座用 `redteam_chain_add`）；其中 `lateral-movement` 要求向目标机写入长期有效 SSH 密钥且全文无回收要求，与本项目边界纪律冲突 |
 
 ## 6. 本仓库自身
 

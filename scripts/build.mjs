@@ -3,7 +3,12 @@
 //
 // 不变式：
 //   · vendor/ 永远不被写入（只在构建时读取），升级时整目录替换即可。
-//   · overlay 里只有新增文件 + 6 处精确锚点插入，没有删改上游逻辑。
+//   · overlay 的改动面（计数方法学见 docs/02）：
+//       - 新增文件：overlay/files/** + overlay/snippets/**
+//       - 锚点编辑：overlay/edits.mjs **172 条**（required 169 / required:false 3）
+//       - snippet 注入点：§3c **86 处**（两份产物各一遍）
+//       - 品牌文案替换：§3b 4 条；页签修正：§3d
+//     这三个数字由 verify [26] 组现场复算守卫，README 与代码不符即硬失败。
 //   · 任何锚点命中数 ≠ 1 立刻失败，并打印文件、锚点、实际命中次数。
 
 import fs from "node:fs";
@@ -1142,10 +1147,43 @@ pkg.plus = {
   base: { name: basePkg.name, version: baseVersion },
   overlayRevision: plusRev,
   generatedAt: new Date().toISOString(),
+  // [dsh-purge-plus] 兼容性口径（2026-11-23）：rc.5 的 compatible 断言保留，
+  // 因为本机确实在 0.2.2-rc.5 上跑过验收与全量回归；但把「证据在哪」写清楚，
+  // 不让它看起来像仓库内可复核的结论。降格成「未验证」会把用户面板的
+  // 未验证警告重新点亮，那是拿可用性换一句更保守的话，不划算。
+  dshCompat: {
+    host: "0.2.2-rc.5",
+    claim: "compatible",
+    verifiedOn: "author machine (this repo's verify + full regression)",
+    evidenceInRepo: false,
+  },
 };
 // Apache-2.0 §4(a)(c)(d)：许可全文与 NOTICE 必须随发行物走。
 for (const extra of ["NOTICE-PLUS.md", "NOTICE-SAFE.txt", "LICENSE-SAFE-APACHE-2.0.txt"]) {
   if (Array.isArray(pkg.files) && !pkg.files.includes(extra)) pkg.files.push(extra);
+}
+// [dsh-purge-plus] 剔除装配包里的死脚本。
+// vendor 快照不含 test/ 与 packages/purge-panel/，但基座 package.json 的
+// scripts 里 test / build:client / test:ui / check:client / test:linux /
+// test:next-host 等都指向这些不存在的路径 —— 装到用户机器上点哪条炸哪条。
+// 规则是通用的（脚本里引用的相对路径必须在装配目录真实存在），不逐条点名；
+// 剔除后再复查一遍，仍有残留即构建失败。verify [27] 组在验收侧守同一条规则。
+{
+  const SCRIPT_PATH_RE = /(?<![\w/.-])((?:test|packages|scripts|bin|lib|docs|locale|presets|skills)\/[^\s"']+)/g;
+  const refsOf = (cmd) => [...String(cmd).matchAll(SCRIPT_PATH_RE)].map((m) => m[1]);
+  const kept = {};
+  const dropped = [];
+  for (const [name, cmd] of Object.entries(pkg.scripts || {})) {
+    const missing = refsOf(cmd).filter((r) => !fs.existsSync(path.join(PKG, r)));
+    if (missing.length) dropped.push(`${name}（缺 ${missing.join(", ")}）`);
+    else kept[name] = cmd;
+  }
+  pkg.scripts = kept;
+  for (const [name, cmd] of Object.entries(kept)) {
+    const missing = refsOf(cmd).filter((r) => !fs.existsSync(path.join(PKG, r)));
+    if (missing.length) die(`package.json 脚本 ${name} 仍引用不存在的路径：${missing.join(", ")}`);
+  }
+  if (dropped.length) log(`✓ package.json 剔除死脚本 ${dropped.length} 条：${dropped.join("；")}`);
 }
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 log(`✓ package.json 重写：${pkg.name}@${pkg.version}  dshTarget=${pkg.dshTarget}`);

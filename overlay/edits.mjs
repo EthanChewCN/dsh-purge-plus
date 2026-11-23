@@ -2538,6 +2538,85 @@ export function buildEdits(repo = resolveRepo()) {
         "  };\n" +
         "}",
     },
+    // ── 安全：/redteam/api 的回环放行（2026-11-23 复核确认的 CSRF 面）─────
+    // 原判据是「来源地址是回环就放行」。但浏览器里的任意网页向 127.0.0.1
+    // POST 时，服务端看到的 remoteAddress **恒为回环** —— 这个判据对浏览器
+    // 攻击等于不存在，而 /redteam/api 的 op 集合包含写资产/漏洞/凭据与改
+    // 平台配置。修法：保留桌面端形态（无 Origin / null / app: / file:）放行，
+    // 只拒绝明确的跨站 http(s) 来源；同源与回环同源继续放行。
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "      /* 来源校验：本机回环一律放行（官方桌面端 Origin 常是 app:// / file://，\n" +
+        "         旧逻辑会把 Origin.host 判空后直接 403，导致技能库/知识库/SQL 全挂）。\n" +
+        "         非回环才要求 Origin 与 Host 同源。 */\n",
+      replace:
+        "      /* 来源校验（[dsh-purge-plus] 2026-11-23 收紧）：\n" +
+        "         桌面端 Origin 常是 app:// / file:// / null，旧逻辑把 Origin.host 判空\n" +
+        "         后直接 403，导致技能库/知识库/SQL 全挂 —— 这部分保留放行。\n" +
+        "         但「回环来源一律放行」等于没有校验：任意网页向 127.0.0.1 POST 时\n" +
+        "         remoteAddress 恒为回环，写 op 可被跨站触发（CSRF）。\n" +
+        "         现判据：无 Origin / null / app: / file: → 放行；http(s) Origin 必须是\n" +
+        "         回环主机或与 Host 同源；其余一律 403。 */\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find: "      const originOk = (() => {\n        if (loopback) return true\n",
+      replace:
+        "      const originOk = (() => {\n" +
+        "        if (loopback) {\n" +
+        "          if (origin === undefined || origin === '' || origin === 'null') return true\n" +
+        "          if (typeof origin === 'string' && /^(app|file):/i.test(origin)) return true\n" +
+        "          try {\n" +
+        "            const oh = new URL(origin)\n" +
+        "            return /^(localhost|127\\.0\\.0\\.1|\\[::1\\]|::1)$/i.test(oh.hostname)\n" +
+        "          } catch { return false }\n" +
+        "        }\n",
+    },
+    // ── 补丁组状态汇总：组内有一条没打上，就不能报「已生效」────────────
+    // 上游 1.7.20 的 rollupDisplayStatus 是「组内任一 applied → 整组 applied」，
+    // 于是一个补丁在两个目标文件里只命中一个（partial）时，面板照样显示已生效。
+    // 上游 master（e519253）已改成逐状态判定；本仓库留在 1.7.20 基线，
+    // 用这两条编辑把同一语义补回来（不整棵替换 vendor）。
+    {
+      file: "lib/core/verify.mjs",
+      required: true,
+      find:
+        "export function rollupDisplayStatus(statuses) {\n" +
+        "  const list = (statuses || []).filter(Boolean);\n" +
+        "  if (list.length === 0) return \"skipped\";\n" +
+        "  if (list.some((s) => s === \"pending\")) return \"pending\";\n" +
+        "  if (list.some((s) => s === \"unmatched\")) return \"unmatched\";\n" +
+        "  if (list.every((s) => DISPLAY_SKIP.has(s))) return \"skipped\";\n" +
+        "  if (list.some((s) => DISPLAY_DONE.has(s))) return \"applied\";\n" +
+        "  return \"skipped\";\n" +
+        "}",
+      replace:
+        "export function rollupDisplayStatus(statuses) {\n" +
+        "  const list = (statuses || []).filter(Boolean);\n" +
+        "  if (list.length === 0) return \"skipped\";\n" +
+        "  if (list.some((s) => s === \"pending\")) return \"pending\";\n" +
+        "  if (list.some((s) => s === \"unmatched\")) return \"unmatched\";\n" +
+        "  if (list.every((s) => DISPLAY_SKIP.has(s))) return \"skipped\";\n" +
+        "  /* [dsh-purge-plus] 组内只要还有一条没打上（partial / pattern_not_found /\n" +
+        "     drifted …），整组就不能报 applied —— 否则「部分生效」在面板上等于「已生效」。 */\n" +
+        "  const live = list.filter((s) => !DISPLAY_SKIP.has(s));\n" +
+        "  if (live.some((s) => !DISPLAY_DONE.has(s))) return \"partial\";\n" +
+        "  if (live.some((s) => DISPLAY_DONE.has(s))) return \"applied\";\n" +
+        "  return \"skipped\";\n" +
+        "}",
+    },
+    {
+      file: "lib/core/verify.mjs",
+      required: true,
+      find: "    else if (st === \"unmatched\") out.unmatched += 1;\n",
+      replace:
+        "    // [dsh-purge-plus] partial 是「有目标文件没打上」，必须算未完成，\n" +
+        "    // 不能落进 else 分支被当成 skipped 并且计入 ready。\n" +
+        "    else if (st === \"unmatched\" || st === \"partial\") out.unmatched += 1;\n",
+    },
   ];
 }
 

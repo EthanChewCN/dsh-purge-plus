@@ -4,7 +4,7 @@
 //   1. 包能 import（补丁表 / 围栏 / 入口）
 //   2. 补丁表不变式：95 条、自有 7 条 ≥201、id 无重复
 //   3. 真实宿主上 --status 能定位 @deepseek-ai 根（DSH_SURFACE=desktop）
-//   4. 自有 5 条出现在状态里（pending/applied/drifted 均可，不能消失）
+//   4. 自有 7 条出现在状态里（pending/applied/drifted 均可，不能消失）
 //   5. 锚点预演：每个自有补丁的 pattern 在宿主文件里的命中次数
 //      —— 命中 0 次 = 宿主升级后锚点烂了，必须重写；命中 ≥2 次 = 会打歪。
 
@@ -1152,6 +1152,92 @@ console.log("[25] 待办角标");
   listeners === 2
     ? ok("跳页事件两端都在（独立窗口 + 面板内嵌）")
     : bad(`跳页事件只有 ${listeners}/2 端在监听 —— 「去智能体页」会点了没反应`);
+}
+
+// ── 26. 计数口径：文档数字 vs 代码复算 ─────────────────────────────
+// 教训有两条：
+//   ① README 曾写「26 处 / 6 处」锚点编辑，实际 172 条 —— 文档与代码
+//      长期各说各话，因为从来没有一条断言把两边对过账。
+//   ② 2026-11-22 的第三方审计把上游补丁静态数成 87 条（漏了 new-tools
+//      里的 #90），据此宣布「95 条被推翻」。运行时 ALL_PATCHES 实测 88 条，
+//      88 + 自有 7 = 95，构建不变式本来就是对的 —— 错的是文本扫描。
+// 所以这里不数源码文本，而是 import 装配产物的补丁表；README 必须出现
+// 同一个数字，加一条编辑/补丁而不改文档就会在这里红。
+console.log("[26] 计数口径（文档 vs 代码复算）");
+{
+  const { buildEdits } = await import("../overlay/edits.mjs");
+  const edits = buildEdits(resolveRepo());
+  const reqFalse = edits.filter((e) => e.required === false).length;
+  const buildSrc = fs.readFileSync(path.join(ROOT, "scripts", "build.mjs"), "utf8");
+  const s0 = buildSrc.indexOf("const SNIPPETS = [");
+  const s1 = buildSrc.indexOf("for (const sn of SNIPPETS)", s0);
+  const snippets = s0 >= 0 && s1 > s0 ? (buildSrc.slice(s0, s1).match(/dialect:/g) || []).length : -1;
+
+  const patchesMod = await import(path.join(PKG, "lib", "patches", "index.mjs"));
+  const overlayMod = await import(path.join(PKG, "lib", "patches", "overlay.mjs"));
+  const allIds = patchesMod.ALL_PATCHES.map((p) => p.id);
+  const ownIds = (overlayMod.OVERLAY_PATCHES || []).map((p) => p.id);
+  const upIds = allIds.filter((id) => !ownIds.includes(id));
+  const missing = [];
+  for (let i = 1; i <= 96; i += 1) if (!upIds.includes(i)) missing.push(i);
+
+  upIds.length === 88
+    ? ok(`上游补丁 ${upIds.length} 条（1–96，缺号 ${missing.length} 个：${missing.join(",")}）`)
+    : bad(`上游补丁应为 88 条，实际 ${upIds.length}（缺号 ${missing.join(",")}）`);
+  ownIds.length === 7
+    ? ok(`自有补丁 ${ownIds.length} 条（${ownIds.join(",")}）`)
+    : bad(`自有补丁应为 7 条，实际 ${ownIds.length}`);
+  allIds.length === 95
+    ? ok(`合计 ${allIds.length} 条（88 + 7）`)
+    : bad(`合计应为 95，实际 ${allIds.length}`);
+  new Set(allIds).size === allIds.length
+    ? ok("id 无重复")
+    : bad("id 有重复");
+
+  edits.length > 0
+    ? ok(`overlay/edits.mjs ${edits.length} 条（required:false ${reqFalse} 条）`)
+    : bad("overlay/edits.mjs 读不出条目");
+  snippets > 0 ? ok(`§3c snippet 注入点 ${snippets} 处`) : bad("snippet 计数失败");
+
+  const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
+  const must = [
+    [`${edits.length} 条`, "锚点编辑条数"],
+    [`${snippets} 处`, "snippet 注入点"],
+    ["88 条", "上游补丁条数"],
+    ["95 条", "补丁合计"],
+  ];
+  for (const [needle, label] of must) {
+    readme.includes(needle) ? ok(`README 含正确数字：${label} = ${needle}`) : bad(`README 缺失正确数字：${label}（应含「${needle}」）`);
+  }
+  for (const stale of ["没有一行逻辑删改", "26 处锚点", "6 处锚点"]) {
+    readme.includes(stale) ? bad(`README 仍有旧错误表述：${stale}`) : ok(`README 无旧表述：${stale}`);
+  }
+  // 英文版同一口径。上一轮审计抓到过「英文徽章漏改」——只查中文等于只查一半。
+  const readmeEn = fs.readFileSync(path.join(ROOT, "README.en.md"), "utf8");
+  for (const [needle, label] of [[`${edits.length} anchor edits`, "锚点编辑条数"], [`${snippets} snippet injection`, "snippet 注入点"]]) {
+    readmeEn.includes(needle) ? ok(`README.en 含正确数字：${label}`) : bad(`README.en 缺失正确数字：${label}（应含「${needle}」）`);
+  }
+}
+
+// ── 27. 装配包 scripts 路径存在 ────────────────────────────────────
+// 与 build §4 的剔除规则同一条：装配包 package.json 里每个 script 引用
+// 的相对路径都必须在装配目录真实存在。build 漏剔或基座将来新增死脚本，
+// 都会在这里红 —— 装到用户机器上「点哪条炸哪条」属于交付事故。
+console.log("[27] 装配包 scripts 路径存在");
+{
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
+  const SCRIPT_PATH_RE = /(?<![\w/.-])((?:test|packages|scripts|bin|lib|docs|locale|presets|skills)\/[^\s"']+)/g;
+  let checked = 0;
+  const missingRefs = [];
+  for (const [name, cmd] of Object.entries(pkgJson.scripts || {})) {
+    for (const m of String(cmd).matchAll(SCRIPT_PATH_RE)) {
+      checked += 1;
+      if (!fs.existsSync(path.join(PKG, m[1]))) missingRefs.push(`${name} → ${m[1]}`);
+    }
+  }
+  missingRefs.length === 0
+    ? ok(`scripts 引用的 ${checked} 个相对路径全部存在`)
+    : bad(`scripts 引用了不存在的路径：${missingRefs.join(" · ")}`);
 }
 
 console.log("");

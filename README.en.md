@@ -61,7 +61,8 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 
 - `vendor/community/` — the base, verbatim copy, read-only at build time;
 - `vendor/safe/` — the porting source, verbatim copy, used only for comparison;
-- `overlay/` — **every** change this repo makes: new files plus 26 precise anchor insertions, with no logic removed or rewritten.
+- `overlay/` — **every** change this repo makes: new files plus **176 anchor edits** (`required` 173 / `required:false` 3)
+  and **86 snippet injection points**, guarded by `verify [26]` (doc numbers must match recomputed code counts).
 
 ---
 
@@ -93,7 +94,7 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 | Drift detection | **16 sites**, can say *why* a patch did not apply | none | takes community |
 | Ops layer | **15 modules / 1,441 lines** | slim | takes community |
 | Update channel | **works** | repo coordinates left blank | takes community, repointed here |
-| Patch coverage | 88 | 59 | base is community |
+| Patch coverage | 88 | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | base is community |
 | Runtime hooks | 10 events | **13 events** | on demand |
 | Host write elevation | none | **`ensureHostWritable` suite** | on the roadmap |
 | Drill desk | 10 tabs | **12 tabs + 6 groups** | on the roadmap |
@@ -208,7 +209,7 @@ Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · 
 | Stage | Action | On failure |
 | :--- | :--- | :--- |
 | Swap vendor | replace `vendor/community` wholesale | — |
-| Replay overlay | insert 26 anchors one by one | hit count mismatch → **build aborts**, prints file and anchor |
+| Replay overlay | apply 176 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
 | Verify | 11 read-only checks | any red → non-zero exit |
 
@@ -229,7 +230,7 @@ node scripts/verify.mjs
 | 1 | Patch table / fence / entry import | package structure broken |
 | 2 | 95 patches, 7 own, no duplicate ids | patch table corrupted |
 | 3 | Real host `--status` locates the `@deepseek-ai` root | host path moved |
-| 4 | The 5 own patches appear in status | patches not wired into the index |
+| 4 | The 7 own patches appear in status | patches not wired into the index |
 | 5 | Each own patch's anchor hits exactly once on the host | anchor stale after upgrade |
 | 6 | Entry loads under DSH's resolution context | export shape changed |
 | 7 | Update channel (tag whitelist / version compare / asset name / coordinate leftovers) | in-app upgrade would break |
@@ -248,7 +249,7 @@ overlay/files/             new files
   ├─ lib/patches/overlay.mjs   own patch table #201–#206
   ├─ lib/subagent-fence.js     leaf-agent fence
   └─ NOTICE-PLUS.md            attribution and change record
-overlay/edits.mjs          26 precise anchor insertions
+overlay/edits.mjs          176 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         11 read-only checks
