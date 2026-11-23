@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import { resolveRepo } from "../overlay/edits.mjs";
@@ -1217,6 +1218,22 @@ console.log("[26] 计数口径（文档 vs 代码复算）");
   for (const [needle, label] of [[`${edits.length} anchor edits`, "锚点编辑条数"], [`${snippets} snippet injection`, "snippet 注入点"]]) {
     readmeEn.includes(needle) ? ok(`README.en 含正确数字：${label}`) : bad(`README.en 缺失正确数字：${label}（应含「${needle}」）`);
   }
+
+  /* 只查"某处含正确数字"是不够的 —— 2026-11-23 就是这样漏的：README.md 第 64 行
+     写 185（新），第 233/273 行还写 176（旧），存在性断言照样绿。这里改成
+     「所有出现处都必须等于实际条数」，任何一处旧数字都算失败。 */
+  for (const [file, text, pattern, unit] of [
+    ["README.md", readme, /(\d+)\s*条锚点编辑/g, "条"],
+    ["README.en.md", readmeEn, /(\d+)\s*anchor edits/g, "anchor edits"],
+  ]) {
+    const seen = [...text.matchAll(pattern)].map((m) => Number(m[1]));
+    const wrong = seen.filter((n) => n !== edits.length);
+    seen.length === 0
+      ? bad(`${file} 找不到锚点编辑条数（应至少出现一次 ${edits.length}）`)
+      : wrong.length === 0
+        ? ok(`${file} 锚点编辑条数一致（${seen.length} 处均为 ${edits.length}）`)
+        : bad(`${file} 锚点编辑条数不一致：${wrong.join("、")} ≠ ${edits.length}`);
+  }
 }
 
 // ── 27. 装配包 scripts 路径存在 ────────────────────────────────────
@@ -1307,6 +1324,211 @@ console.log("[28] op 契约（两家上游能力面 vs 产物）");
     .concat([path.join(PKG, "lib/preset-default.js")])
     .filter((f) => !fs.readFileSync(f, "utf8").slice(0, 400).includes("[dsh-purge-plus]"));
   unmarked.length === 0 ? ok("移植件均带来源标注（Apache-2.0 §4(b)）") : bad(`缺来源标注：${unmarked.map((f) => path.basename(f)).join(", ")}`);
+}
+
+// ── [30] 团队任务板面板 + CVE 底库 ────────────────────────────────
+// 这两块最容易出的错都是「代码写了但没接上」：页签加了却没进导航分组
+// （二级页签被过滤掉，点不出来），工具加了却指向一个不在包里的构建器
+// （报错文案让人去跑一个不存在的脚本）。
+{
+  console.log("[30] 团队任务板 / CVE 底库");
+  const uiSrc = fs.readFileSync(path.join(PKG, "lib/redteam/ui.js"), "utf8");
+  const hasFn = /async function handleTeamBoardOp\(ctx, store, request\)/.test(uiSrc);
+  const hasRoute = /const teamBoardResult = await handleTeamBoardOp\(ctx, store, request\)/.test(uiSrc);
+  hasFn && hasRoute ? ok("任务板数据面在 ui.js 且已接进 /redteam/api 路由") : bad("任务板数据面没接进路由（op 会 404/unknown）");
+
+  const panel = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+  const redteam = fs.readFileSync(path.join(PKG, "lib/redteam/client.js"), "utf8");
+  /\["team",/.test(panel) && /\['team', '任务板'\]/.test(redteam)
+    ? ok("两份产物都有「任务板」页签") : bad("任务板页签缺失（面板内嵌版或独立窗口）");
+  /st\.tab === "team"/.test(panel) && /st\.tab === 'team'/.test(redteam)
+    ? ok("两份产物都有任务板分发") : bad("任务板分发缺失");
+  /tabs: \['agents', 'team'\]/.test(panel) && /tabs: \['agents', 'team'\]/.test(redteam)
+    ? ok("导航分组「协同进度」含任务板") : bad("任务板没进导航分组（二级页签会被过滤掉）");
+  /* 只读纪律：面板里没有 Agent 身份，任何 teamTask* 写 op 都会绕过 TEAM_LEAD_REQUIRED。 */
+  /op:\s*["']teamTask/.test(panel) || /op:\s*["']teamTask/.test(redteam)
+    ? bad("任务板出现了写 op（会绕过 TEAM_LEAD_REQUIRED）") : ok("任务板只读（无写 op）");
+
+  /* 判定口径：会话头的 agentPreset 是建会话时的快照，切过预设它不变。
+     只看 header 会把「中途切到红队」的会话判成非红队，进而误关它的团队模式
+     （v0.1.54 实测踩过：8 条里 1 条是被误关的真红队会话）。 */
+  /event\.type === ['"]agent-preset\/selected['"]/.test(uiSrc)
+    ? ok("预设判定读 agent-preset/selected（不只看 header 快照）")
+    : bad("预设判定只看 header：中途切到红队的会话会被误关");
+  /Array\.isArray\(request\.restore\)/.test(uiSrc)
+    ? ok("开启回滚只认显式 restore 列表（不自动开）")
+    : bad("restore 会自动推断：可能把用户手动关掉的团队模式又开回去");
+  /* 反向同一个坑：按 header 跳过不读日志，会漏掉「头是红队、中途切到普通、
+     team/mode 还开着」的会话。全量读 65 会话 / 104MB 实测约 2.1 秒，不值得为它省。 */
+  /skipped\.push\(/.test(uiSrc) || /const skipped = \[\]/.test(uiSrc)
+    ? bad("审计按 header 跳过会话：会漏掉「头是红队、中途切走、模式还开着」的那一类")
+    : ok("审计不按 header 跳过（每份日志都读，不漏反向误判）");
+
+  /* 行组装是显式白名单：官方视图的字段少复制一个，面板就是「看着正常、少一栏」。
+     v0.1.56 实测漏了 writeScopeWarnings —— 两条 in_progress 任务写域重叠，
+     面板上一条告警都没有。这里把官方 TASK_VIEW_SCHEMA 的 11 个字段逐个对一遍。 */
+  const rowStart = uiSrc.indexOf("id: String(task.id");
+  const rowBlock = rowStart < 0 ? "" : uiSrc.slice(rowStart, uiSrc.indexOf("report_at:", rowStart) + 12);
+  const officialFields = [
+    ["id", "id:"], ["revision", "revision:"], ["subject", "subject:"],
+    ["description", "description:"], ["status", "status:"], ["blockedBy", "blockedBy:"],
+    ["writeScopes", "writeScopes:"], ["ownerId", "owner_id:"], ["ownerName", "owner_name:"],
+    ["ready", "ready:"], ["writeScopeWarnings", "writeScopeWarnings:"],
+  ];
+  const missingFields = officialFields.filter(([, token]) => !rowBlock.includes(token)).map(([name]) => name);
+  rowStart >= 0 && missingFields.length === 0
+    ? ok(`任务行保留官方视图全部 ${officialFields.length} 个字段（含写域重叠告警）`)
+    : bad(`任务行漏了官方字段：${missingFields.join(", ") || "整段行组装都找不到"}`);
+  /* 字段传了但界面不画 = 等于没有。两份产物都要渲染。 */
+  /writeScopeWarnings/.test(panel) && /writeScopeWarnings/.test(redteam)
+    ? ok("两份产物都渲染写域冲突告警")
+    : bad("写域冲突告警没渲染（数据层修了但界面不画）");
+
+  /* 上面那条只证明「那一行在」，不证明「值是对的」。v0.1.57 就是这么绿的：
+     代码写的是 `teams.tasks.list(target)`，而 TeamService 上没有 `tasks` 成员，
+     探测永远为假 → hostView 恒 null → writeScopeWarnings 恒空。
+     所以这里既要查"取宿主视图的入口对不对"，也要把规则真跑一遍对答案。 */
+  /teams\.listTasks\(/.test(uiSrc) && /agentsSvc\.get\(|agents\.get\(/.test(uiSrc)
+    ? ok("宿主视图经 teams.listTasks(agent) 获取（Agent 由 agents.get 按会话取）")
+    : bad("拿不到宿主视图：listTasks 需要 Agent，缺 agents.get 就只能永远退回快照");
+  /teams\.tasks\b/.test(uiSrc)
+    ? bad("还在探测 teams.tasks —— TeamService 没有这个成员，那段是死代码")
+    : ok("没有 teams.tasks 死探测");
+  /warningsOf\(allTasks, task\)/.test(uiSrc)
+    ? ok("快照退回时按官方同一条规则现算写域告警")
+    : bad("快照退回时写域告警恒空（透传一个快照里根本不存在的字段）");
+
+  /* 行为测试：期望值取自宿主自己的 team_task_list 实测输出
+     （task-1 已完成、task-2 进行中、两条写域都是 recon → task-1 与 task-3 各得一条告警）。 */
+  try {
+    const { writeScopeWarningsOf, scopesOverlap } = await import(
+      path.join(PKG, "lib/redteam", "team-board-views.js")
+    );
+    const fixtures = [
+      { id: "task-1", status: "completed", writeScopes: ["recon"] },
+      { id: "task-2", status: "in_progress", writeScopes: ["recon"] },
+      { id: "task-3", status: "pending", writeScopes: ["recon"] },
+      { id: "task-4", status: "pending", writeScopes: ["docs/report.md"] },
+      { id: "task-5", status: "deleted", writeScopes: ["recon"] },
+    ];
+    const cases = [
+      ["已完成任务与进行中任务重叠", writeScopeWarningsOf(fixtures, fixtures[0]), ["write scopes overlap with task-2"]],
+      ["进行中任务自身不告警", writeScopeWarningsOf(fixtures, fixtures[1]), []],
+      ["待领取任务与进行中任务重叠", writeScopeWarningsOf(fixtures, fixtures[2]), ["write scopes overlap with task-2"]],
+      ["写域不相交不告警", writeScopeWarningsOf(fixtures, fixtures[3]), []],
+    ];
+    const failed = cases.filter(([, got, want]) => JSON.stringify(got) !== JSON.stringify(want));
+    failed.length === 0
+      ? ok(`写域告警行为正确（${cases.length} 个用例，deleted 兄弟不计入）`)
+      : bad(`写域告警行为不对：${failed.map(([n, got, want]) => `${n} 得到 ${JSON.stringify(got)} 期望 ${JSON.stringify(want)}`).join("；")}`);
+    scopesOverlap("recon", "reconciliation") === false && scopesOverlap("recon", "recon/subs") === true
+      ? ok("写域比较落在路径分隔符上（recon ≠ reconciliation，recon ⊃ recon/subs）")
+      : bad("写域比较用裸 startsWith：recon 会把 reconciliation 也算成重叠");
+
+    /* 空串口径：上游 `scopesOverlap('', '')` 为真。空串实际进不了库
+       （写入时 writeScope('') 抛 TEAM_INVALID_WRITE_SCOPE），所以下面这组
+       断言钉的是"判据本身与上游逐字一致"，不是某个真实可达场景。 */
+    const emptyPair = [
+      { id: "task-a", status: "in_progress", writeScopes: [""] },
+      { id: "task-b", status: "in_progress", writeScopes: [""] },
+    ];
+    const emptyVsReal = [
+      { id: "task-a", status: "in_progress", writeScopes: [""] },
+      { id: "task-c", status: "in_progress", writeScopes: ["recon"] },
+    ];
+    const noScopes = [
+      { id: "task-d", status: "in_progress", writeScopes: [] },
+      { id: "task-e", status: "in_progress", writeScopes: [] },
+    ];
+    const emptyCases = [
+      ["空串写域互撞与宿主同报", writeScopeWarningsOf(emptyPair, emptyPair[0]), ["write scopes overlap with task-b"]],
+      ["空串写域不撞真实写域", writeScopeWarningsOf(emptyVsReal, emptyVsReal[0]), []],
+      ["未声明写域（空数组）互不告警", writeScopeWarningsOf(noScopes, noScopes[0]), []],
+    ];
+    const emptyFailed = emptyCases.filter(([, got, want]) => JSON.stringify(got) !== JSON.stringify(want));
+    emptyFailed.length === 0
+      ? ok("写域空串口径与宿主一致（3 个用例）")
+      : bad(`写域空串口径与宿主分叉：${emptyFailed.map(([n, got, want]) => `${n} 得到 ${JSON.stringify(got)} 期望 ${JSON.stringify(want)}`).join("；")}`);
+  } catch (error) {
+    bad(`写域规则模块导入失败：${error && error.message ? error.message : String(error)}`);
+  }
+
+  /* 明确点名却找不到会话时不能静默换板 —— 面板会把别人的任务当成这个会话的显示。
+     缺参和找不到也要分开报（v0.1.58 两种情况都报"会话不在本进程"，原因说错）。 */
+  /找不到会话：/.test(uiSrc) && /teamBoardMode 需要 session 参数/.test(uiSrc)
+    ? ok("任务板：点名找不到会话时报错，缺参与找不到分开报")
+    : bad("任务板：显式 session 找不到时可能静默换成别的会话的板");
+  /error:\s*'[^']*会话不在本进程/.test(uiSrc)
+    ? bad("还在用「会话不在本进程」这句：缺参时它把原因说反了")
+    : ok("没有「会话不在本进程」这句误导文案");
+
+  /* 缺参文案：把 undefined 拼进错误里，调用方分不清「你没给 id」和「这个 id 不存在」。
+     这里真起一个临时 store 打一遍 dispatch —— 只查字符串在不在等于没查。 */
+  try {
+    const { RedteamStore, dispatch } = await import(path.join(PKG, "lib/redteam", "store-core.js"));
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-purge-verify-"));
+    const probeStore = new RedteamStore(tmpRoot);
+    const probes = [
+      ["pocGet", { op: "pocGet" }, /需要 id 或 code/],
+      ["pocDelete", { op: "pocDelete" }, /需要 id 或 code/],
+      ["pocUse", { op: "pocUse" }, /需要 id 或 code/],
+      ["pocUpdate", { op: "pocUpdate" }, /需要 id 或 code/],
+      ["activateEngagement", { op: "activateEngagement" }, /需要 engagement/],
+      ["pocGet 查无此条", { op: "pocGet", id: 99999 }, /poc not found: 99999/],
+      ["activateEngagement 查无此靶标", { op: "activateEngagement", engagement: "no-such-engagement" }, /engagement not found/],
+    ];
+    const bads = [];
+    for (const [label, req, want] of probes) {
+      const got = dispatch(probeStore, req);
+      const text = String((got && got.error) || "");
+      if (!want.test(text)) bads.push(`${label} 得到 ${JSON.stringify(text)}`);
+      if (/undefined/.test(text)) bads.push(`${label} 文案里漏了 undefined：${JSON.stringify(text)}`);
+    }
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    bads.length === 0
+      ? ok(`缺参文案正确（${probes.length} 个用例，无 undefined 外泄）`)
+      : bad(`缺参文案不对：${bads.join("；")}`);
+  } catch (error) {
+    bad(`dispatch 探测失败：${error && error.message ? error.message : String(error)}`);
+  }
+
+  const builder = path.join(PKG, "scripts", "build-cve-db.mjs");
+  fs.existsSync(builder) ? ok("CVE 构建器随包分发（scripts/build-cve-db.mjs）") : bad("CVE 构建器没进包（工具报错会指向不存在的脚本）");
+  const toolsSrc2 = fs.readFileSync(path.join(PKG, "lib/redteam", "tools.js"), "utf8");
+  /name: 'redteam_cve'/.test(toolsSrc2) ? ok("redteam_cve 已注册") : bad("redteam_cve 未注册");
+
+  const localDb = path.join(ROOT, "intel", "cve.db");
+  if (fs.existsSync(localDb)) {
+    const { validateCveDbFile } = await import(path.join(PKG, "lib/redteam", "cve-db.js"));
+    const v = validateCveDbFile(localDb);
+    v.ok ? ok(`本机 CVE 库校验通过（v${v.version} · ${v.count} 条）`) : bad(`本机 CVE 库校验失败：${v.error}`);
+  } else {
+    ok("本机未建 CVE 库（可选层：node scripts/build-cve-db.mjs --install）");
+  }
+}
+
+// [31] 验收组数口径（文档 vs 自身）
+// 本组把自己也算进去：组号必须是 1..N 连续，两份 README 里每一处「N 组只读」
+// 都必须等于这个 N。上一版 README 写着 28 组而实际已有 30 组 —— 存在性断言
+// 抓不到「数字过时」，这里逐处比对。
+console.log("[31] 验收组数口径（文档 vs 自身）");
+{
+  const selfSrc = fs.readFileSync(path.join(ROOT, "scripts", "verify.mjs"), "utf8");
+  const nums = [...selfSrc.matchAll(/console\.log\("(?:\\n)?\[(\d+)\]/g)].map(m => Number(m[1]));
+  const uniq = [...new Set(nums)].sort((a, b) => a - b);
+  const total = uniq.length;
+  const contiguous = total > 0 && uniq.every((n, i) => n === i + 1);
+  contiguous ? ok(`组号连续 1–${total}（共 ${total} 组）`) : bad(`组号不连续：${uniq.join(",")}`);
+  for (const [file, re] of [
+    ["README.md", /(\d+) 组只读/g],
+    ["README.en.md", /(\d+) read-only checks/g],
+  ]) {
+    const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    const found = [...text.matchAll(re)].map(m => Number(m[1]));
+    if (found.length === 0) bad(`${file} 没有出现验收组数`);
+    else if (found.every(n => n === total)) ok(`${file} 验收组数一致（${found.length} 处均为 ${total}）`);
+    else bad(`${file} 验收组数不一致：${found.join(",")} ≠ ${total}`);
+  }
 }
 
 console.log("");

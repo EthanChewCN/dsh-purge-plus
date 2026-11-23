@@ -5,7 +5,7 @@
       const TAB_GROUPS = [
         { key: 'overview', label: '工作总览', tabs: ['overview'] },
         { key: 'assets', label: '资产台账', tabs: ['assets'] },
-        { key: 'collaboration', label: '协同进度', tabs: ['agents'] },
+        { key: 'collaboration', label: '协同进度', tabs: ['agents', 'team'] },
         { key: 'results', label: '成果与报告', tabs: ['findings', 'artifacts', 'evidence', 'chain', 'scores', 'report'] },
         { key: 'resources', label: '资源中心', tabs: ['sessions', 'knowledge', 'skills'] },
         { key: 'settings', label: '环境与设置', tabs: ['env'] },

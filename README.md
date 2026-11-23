@@ -54,15 +54,15 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 ```
 基座   dsh-purge Community   MIT         宿主补丁 · 补丁引擎 · 运维层
 移植   dsh-purge safe        Apache-2.0  能力面更宽的一条支线
-结果   dsh-purge-plus        独立变体     95 条补丁 · 28 组只读验收
+结果   dsh-purge-plus        独立变体     95 条补丁 · 31 组只读验收
 ```
 
 本仓库**不是** community 的 fork，也**不是** safe 的 fork。它把两个上游都当作只读输入：
 
 - `vendor/community/` —— 基座，原样副本，构建时只读；
 - `vendor/safe/` —— 移植来源，原样副本，只用于比对；
-- `overlay/` —— 本仓库**全部**改动：新增文件 + **176 条锚点编辑**（`required` 173 / `required:false` 3）
-  + **86 处 snippet 注入点** + 4 条品牌文案替换。改动面由 `verify [26]` 组现场复算守卫，
+- `overlay/` —— 本仓库**全部**改动：新增文件 + **185 条锚点编辑**（`required` 182 / `required:false` 3）
+  + **92 处 snippet 注入点** + 4 条品牌文案替换。改动面由 `verify [26]` 组现场复算守卫，
   文档数字与代码不符即验收失败。
 
 ---
@@ -81,7 +81,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 补丁引擎 | 30 个 schema 字段：`drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
 | 运维层 | 审计流水 `audit.jsonl`、跨进程维护锁、回滚事务、逐层自检、运行时探针、漂移检测 |
 | 在线升级 | 面板「检查更新」可用，匿名拉 GitHub 发行，逐字节核 `SHA256SUMS.txt` |
-| 演练台 | 左侧栏整页设置 + 红队事实库（SQLite），11 个页签 |
+| 演练台 | 左侧栏整页设置 + 红队事实库（SQLite），12 个页签 |
 
 ---
 
@@ -100,8 +100,8 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 宿主写入提权 | 无 | **`ensureHostWritable` 四件套** | 已列入路线图 |
 | 演练台 | 10 tab | 12 tab + 6 分组 | **11 tab**（已并入「凭据与文件」）；6 分组导航在路线图 |
 | 技能库 | 23 个 | 40 个 | **40 个**（23 + safe 独有 17，逐条核对工具引用） |
-| 团队任务板 | 无 | 默认开（根会话） | **已移植**（team-mode + ticket-stage / team-board / orchestrator-clock / slot-state） |
-| 情报数据层 | 无 | KEV / CVE 底库 / 云同步 | **已移植**（kev / cve-db / intel-sync；数据不随包发，未配 `REDTEAM_INTEL_BASE` 即关闭） |
+| 团队任务板 | 无 | 默认开（根会话） | **已移植 + 有面板入口**（`team/mode` 开关、任务板页签、历史开关审计/清理） |
+| 情报数据层 | 无 | KEV / CVE 底库 / 云同步 | **已移植 + 有构建器**（kev / cve-db / intel-sync；`scripts/build-cve-db.mjs` 从 NVD + KEV + EPSS 建本机库，数据不随包发） |
 
 ### 为什么不整包用 safe
 
@@ -158,7 +158,7 @@ shasum -a 256 -c SHA256SUMS.txt
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 29 组只读验收，不动宿主
+node scripts/verify.mjs     # 31 组只读验收，不动宿主
 ```
 
 然后同上：面板 → 插件 → 从文件安装 → 选 `dist/dsh-purge-plus-<ver>.tgz` → 重启 DSH。
@@ -230,9 +230,9 @@ pnpm remove dsh-purge-plus                                   # 摘掉插件
 | 阶段 | 动作 | 失败会怎样 |
 | :--- | :--- | :--- |
 | 换 vendor | 整目录替换 `vendor/community` | — |
-| 重放 overlay | 176 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
+| 重放 overlay | 185 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
 | 重建 | vendor + overlay → `dist/package` → tgz | 断言不符 → 中止 |
-| 验收 | 28 组只读检查 | 任一组红 → 非零退出 |
+| 验收 | 31 组只读检查 | 任一组红 → 非零退出 |
 
 锚点「恰好命中 N 次」是硬约束：命中 0 次 = 宿主升级后锚点烂了；命中 ≥2 次 = 会打歪。两种情况都直接失败。
 
@@ -270,10 +270,10 @@ overlay/files/             新增文件
   ├─ lib/patches/overlay.mjs   自有补丁表 #201–#206
   ├─ lib/subagent-fence.js     叶子节点围栏
   └─ NOTICE-PLUS.md            署名与改动记录
-overlay/edits.mjs          176 条锚点编辑清单
+overlay/edits.mjs          185 条锚点编辑清单
 overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         28 组只读验收
+scripts/verify.mjs         31 组只读验收
 scripts/sync-upstream.sh   上游升级：换 vendor → 重放 → 重建 → 验收
 （`docs/` 为开发期维护文档：移植判定、宿主兼容报告、发布手册、许可与署名合规清单。
  只在本机保留，不进公开仓库，也不随发行物分发 —— 见 .gitignore 的 /docs/。）

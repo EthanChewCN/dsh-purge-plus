@@ -2621,6 +2621,126 @@ export function buildEdits(repo = resolveRepo()) {
         "    // 不能落进 else 分支被当成 skipped 并且计入 ready。\n" +
         "    else if (st === \"unmatched\" || st === \"partial\") out.unmatched += 1;\n",
     },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find: "  ctx.tools.register(withStructuredErrors(defineTool({\n    name: 'redteam_engagement_open',",
+      replace: SNIP("tools-cve.js") + "\n  ctx.tools.register(withStructuredErrors(defineTool({\n    name: 'redteam_engagement_open',",
+    },
+
+    // ══ Z. 团队任务板（官方 Agent Teams）面板入口 ════════════════════
+    // 数据面放在 lib/redteam/ui.js：只有那里有 ctx，能拿到 sessions 与 agentTeams。
+    // 任务本身是根会话日志里的 `team/task` 事件，由宿主的 sessionProjections 折叠；
+    // store-core 是无 Cordis 依赖的纯模块（只拿得到 root 目录），硬塞进去只能靠猜
+    // 日志路径，宿主观影一改就静默变成空白表 —— 那正是本包反复要避免的假绿灯。
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find: "async function handleAgentsOp(ctx, request) {",
+      replace: SNIP("team-board-ui.js") + "\nasync function handleAgentsOp(ctx, request) {",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find: "        const agentsResult = await handleAgentsOp(ctx, request)\n",
+      replace:
+        "        /* [dsh-purge-plus] 团队任务板：在 store 分发之前拦，因为数据不在 store 里。 */\n" +
+        "        const teamBoardResult = await handleTeamBoardOp(ctx, store, request)\n" +
+        "        if (teamBoardResult !== undefined) {\n" +
+        "          sendJson(res, 200, teamBoardResult)\n" +
+        "          return\n" +
+        "        }\n" +
+        "        const agentsResult = await handleAgentsOp(ctx, request)\n",
+    },
+
+    // ══ AA. 缺参文案：把 `undefined` 从用户可见的错误里赶出去 ═════════
+    // 审计实测：不带 id 调 pocGet/pocUpdate/pocDelete/pocUse/shotData/readAttackFile，
+    // 返回的是 `poc not found: undefined` —— 把 JS 的 undefined 拼进了提示文案。
+    // 调用方看不出是"你没给 id"还是"这个 id 不存在"，而这两件事的修法完全不同。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      const key = req.id !== undefined ? req.id : req.code\n" +
+        "      const hit = store.getPoc(key)\n",
+      replace:
+        "      const key = req.id !== undefined ? req.id : req.code\n" +
+        "      /* [dsh-purge-plus] 缺参和查无此条是两件事：不分开报，调用方只能看到 undefined */\n" +
+        "      if (key === undefined || key === null || key === '') {\n" +
+        "        return { ok: false, error: 'pocGet 需要 id 或 code' }\n" +
+        "      }\n" +
+        "      const hit = store.getPoc(key)\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    if (op === 'pocUpdate') return { ok: true, poc: store.updatePoc(req.id !== undefined ? req.id : req.code, req.patch || req) }\n" +
+        "    if (op === 'pocDelete') return Object.assign({ ok: true }, store.deletePoc(req.id !== undefined ? req.id : req.code))\n" +
+        "    if (op === 'pocUse') return Object.assign({ ok: true }, store.markPocUsed(req.id !== undefined ? req.id : req.code, req.used_on))\n",
+      replace:
+        "    /* [dsh-purge-plus] 三个写 op 的缺参守卫：先判参数，再判存在。 */\n" +
+        "    if (op === 'pocUpdate') {\n" +
+        "      const key = req.id !== undefined ? req.id : req.code\n" +
+        "      if (key === undefined || key === null || key === '') return { ok: false, error: 'pocUpdate 需要 id 或 code' }\n" +
+        "      return { ok: true, poc: store.updatePoc(key, req.patch || req) }\n" +
+        "    }\n" +
+        "    if (op === 'pocDelete') {\n" +
+        "      const key = req.id !== undefined ? req.id : req.code\n" +
+        "      if (key === undefined || key === null || key === '') return { ok: false, error: 'pocDelete 需要 id 或 code' }\n" +
+        "      return Object.assign({ ok: true }, store.deletePoc(key))\n" +
+        "    }\n" +
+        "    if (op === 'pocUse') {\n" +
+        "      const key = req.id !== undefined ? req.id : req.code\n" +
+        "      if (key === undefined || key === null || key === '') return { ok: false, error: 'pocUse 需要 id 或 code' }\n" +
+        "      return Object.assign({ ok: true }, store.markPocUsed(key, req.used_on))\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "    if (op === 'shotData') return Object.assign({ ok: true }, store.readShot(id, req.id !== undefined ? req.id : req.shot_id))\n",
+      replace:
+        "    if (op === 'shotData') {\n" +
+        "      const shot = req.id !== undefined ? req.id : req.shot_id\n" +
+        "      if (shot === undefined || shot === null || shot === '') return { ok: false, error: 'shotData 需要 id 或 shot_id' }\n" +
+        "      return Object.assign({ ok: true }, store.readShot(id, shot))\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "      const hit = store.readAttackFile(id, req.id)\n",
+      replace:
+        "      /* [dsh-purge-plus] 缺参先报缺参，别把 undefined 当成「这个 id 不存在」 */\n" +
+        "      if (req.id === undefined || req.id === null || req.id === '') {\n" +
+        "        return { ok: false, error: 'readAttackFile 需要 id' }\n" +
+        "      }\n" +
+        "      const hit = store.readAttackFile(id, req.id)\n",
+    },
+    // activateEngagement 是"选择靶标"本身，要求已有靶标是循环依赖，所以它不能进
+    // WRITE_OPS（那里是"必须已有靶标才能动"的守卫）。但缺参时它返回的
+    // `{ok:false, current:…}` 没有 error 字段，面板上就是一条空白提示 —— 补上。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      const activated = store.setActiveEngagement(req.engagement)\n",
+      replace:
+        "      if (req.engagement === undefined || req.engagement === null || req.engagement === '') {\n" +
+        "        return { ok: false, error: 'activateEngagement 需要 engagement' }\n" +
+        "      }\n" +
+        "      const activated = store.setActiveEngagement(req.engagement)\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "      return { ok: activated, current: store.activeEngagementId() }\n",
+      replace:
+        "      return activated\n" +
+        "        ? { ok: true, current: store.activeEngagementId() }\n" +
+        "        : { ok: false, error: `engagement not found: ${req.engagement}`, current: store.activeEngagementId() }\n",
+    },
   ];
 }
 

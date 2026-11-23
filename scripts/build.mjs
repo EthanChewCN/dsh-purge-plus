@@ -5,8 +5,8 @@
 //   · vendor/ 永远不被写入（只在构建时读取），升级时整目录替换即可。
 //   · overlay 的改动面（计数方法学见 docs/02）：
 //       - 新增文件：overlay/files/** + overlay/snippets/**
-//       - 锚点编辑：overlay/edits.mjs **172 条**（required 169 / required:false 3）
-//       - snippet 注入点：§3c **86 处**（两份产物各一遍）
+//       - 锚点编辑：overlay/edits.mjs **179 条**（required 176 / required:false 3）
+//       - snippet 注入点：§3c **92 处**（两份产物各一遍）
 //       - 品牌文案替换：§3b 4 条；页签修正：§3d
 //     这三个数字由 verify [26] 组现场复算守卫，README 与代码不符即硬失败。
 //   · 任何锚点命中数 ≠ 1 立刻失败，并打印文件、锚点、实际命中次数。
@@ -54,6 +54,18 @@ log(`✓ vendor/community → dist/build/package（${countFiles(PKG)} 个文件�
 // ── 2. 覆盖新增文件 ───────────────────────────────────────────────
 fs.cpSync(OVERLAY_FILES, PKG, { recursive: true });
 log(`✓ overlay/files 覆盖完成`);
+
+/* CVE 底库构建器要跟着包走：redteam_cve 的报错里写的就是「在插件目录跑
+   node scripts/build-cve-db.mjs --install」。只拷这一个文件 —— 上游 scripts/
+   里那几十个脚本在本包里都是死路径（§4 的剔除规则会把它们从 package.json 摘掉）。 */
+{
+  const src = path.join(ROOT, "scripts", "build-cve-db.mjs");
+  const dst = path.join(PKG, "scripts", "build-cve-db.mjs");
+  if (!fs.existsSync(src)) die(`CVE 构建器缺失：${src}`);
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.copyFileSync(src, dst);
+  log(`✓ scripts/build-cve-db.mjs 已随包分发`);
+}
 
 // 包内 README 用本仓库的：vendor 带的是 community 的 README，装完在面板里
 // 看到的会是「dsh-purge Community」，用户会以为装的是别人的包。
@@ -1094,6 +1106,45 @@ const SNIPPETS = [
     what: "待办角标挂载",
     anchor: "    h(EnvAdaptSendGate),\n",
     text: "    h(AttentionBadge, null),\n",
+  },
+
+  // ── P27：团队任务板（官方 Agent Teams 的只读视图）──────────────────
+  // 组件插在 FindingsTab 之前（与其它页同一个作用域）。
+  // 顺序有讲究：先插组件，再改页签表，最后插分发 —— 分发锚点引用的是前面已插入的行。
+  // 两份产物都要改，否则「面板里点开」与「全面浏览新窗口」页签不一致。
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", src: "team-board-tab.js",
+    what: "团队任务板组件", mode: "before",
+    anchor: "    function FindingsTab(props) {",
+  },
+  {
+    file: "client.js", dialect: "panel", src: "team-board-tab.js",
+    what: "团队任务板组件（面板内嵌版）", mode: "before",
+    anchor: "  function FindingsTab(props) {",
+  },
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
+    what: "页签表加任务板",
+    anchor: "        ['skills', '技能库'],\n",
+    text: "        ['skills', '技能库'],\n        ['team', '任务板'],\n",
+  },
+  {
+    file: "client.js", dialect: "panel", mode: "replace",
+    what: "页签表加任务板（面板内嵌版）",
+    anchor: '      ["skills", "\\u6280\\u80FD\\u5E93"]\n',
+    text: '      ["skills", "\\u6280\\u80FD\\u5E93"],\n      ["team", "\\u4EFB\\u52A1\\u677F"]\n',
+  },
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", mode: "after",
+    what: "任务板分发",
+    anchor: "      else if (st.tab === 'evidence') body = h(EvidenceTab, { engagement: eng, refreshKey: refreshKey })\n",
+    text: "      else if (st.tab === 'team') body = h(TeamBoardTab, { refreshKey: refreshKey })\n",
+  },
+  {
+    file: "client.js", dialect: "panel", mode: "after",
+    what: "任务板分发（面板内嵌版）",
+    anchor: '    else if (st.tab === "evidence")\n      body = h2(EvidenceTab, { engagement: eng, refreshKey });\n',
+    text: '    else if (st.tab === "team")\n      body = h2(TeamBoardTab, { refreshKey, session: rtSessionId() });\n',
   },
 ];
 for (const sn of SNIPPETS) {

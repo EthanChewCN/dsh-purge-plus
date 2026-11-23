@@ -54,15 +54,15 @@ It does not change the model, the cloud account, or upload prompts and configura
 ```
 base    dsh-purge Community   MIT         host patches · patch engine · ops layer
 port    dsh-purge safe        Apache-2.0  a branch with a wider capability surface
-result  dsh-purge-plus        variant     95 patches · 11 read-only checks
+result  dsh-purge-plus        variant     95 patches · 31 read-only checks
 ```
 
 This repo is **not** a fork of community and **not** a fork of safe. It treats both upstreams as read-only inputs:
 
 - `vendor/community/` — the base, verbatim copy, read-only at build time;
 - `vendor/safe/` — the porting source, verbatim copy, used only for comparison;
-- `overlay/` — **every** change this repo makes: new files plus **176 anchor edits** (`required` 173 / `required:false` 3)
-  and **86 snippet injection points**, guarded by `verify [26]` (doc numbers must match recomputed code counts).
+- `overlay/` — **every** change this repo makes: new files plus **185 anchor edits** (`required` 182 / `required:false` 3)
+  and **92 snippet injection points**, guarded by `verify [26]` (doc numbers must match recomputed code counts).
 
 ---
 
@@ -97,10 +97,10 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 | Patch coverage | 88 | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | base is community |
 | Runtime hooks | 10 events | **13 events** | on demand |
 | Host write elevation | none | **`ensureHostWritable` suite** | on the roadmap |
-| Drill desk | 10 tabs | **12 tabs + 6 groups** | on the roadmap |
+| Drill desk | 10 tabs | **12 tabs + 6 groups** | **12 tabs** (artifacts + evidence + team board merged in) |
 | Skill library | 23 | 40 | **40** (23 + safe's 17, every tool reference checked) |
-| Team task board | none | on by default (root session) | **ported** (team-mode + ticket-stage / team-board / orchestrator-clock / slot-state) |
-| Intel data layer | none | KEV / CVE base DB / cloud sync | **ported** (kev / cve-db / intel-sync; data not shipped, off unless `REDTEAM_INTEL_BASE` is set) |
+| Team task board | none | on by default (root session) | **ported + has a panel entry** (`team/mode` toggle, task-board tab, legacy-switch audit/reset) |
+| Intel data layer | none | KEV / CVE base DB / cloud sync | **ported + has a builder** (kev / cve-db / intel-sync; `scripts/build-cve-db.mjs` builds the local DB from NVD + KEV + EPSS; data is not shipped) |
 
 ### Why not ship safe wholesale
 
@@ -156,7 +156,7 @@ The repository root is **not** an installable package (there is no `package.json
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 29 read-only checks, host untouched
+node scripts/verify.mjs     # 31 read-only checks, host untouched
 ```
 
 Then as above: panel → Plugins → Install from file → pick `dist/dsh-purge-plus-<ver>.tgz` → restart DSH.
@@ -228,9 +228,9 @@ Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · 
 | Stage | Action | On failure |
 | :--- | :--- | :--- |
 | Swap vendor | replace `vendor/community` wholesale | — |
-| Replay overlay | apply 176 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
+| Replay overlay | apply 185 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
-| Verify | 11 read-only checks | any red → non-zero exit |
+| Verify | 31 read-only checks | any red → non-zero exit |
 
 "Exactly N hits" is a hard constraint: 0 hits means the anchor rotted after a host upgrade; ≥2 means it would patch the wrong place. Both fail the build.
 
@@ -268,10 +268,10 @@ overlay/files/             new files
   ├─ lib/patches/overlay.mjs   own patch table #201–#206
   ├─ lib/subagent-fence.js     leaf-agent fence
   └─ NOTICE-PLUS.md            attribution and change record
-overlay/edits.mjs          176 anchor edits
+overlay/edits.mjs          185 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         11 read-only checks
+scripts/verify.mjs         31 read-only checks
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify
 ( `docs/` holds development-time maintenance notes: port verdicts, host compatibility
   report, release handbook, compliance checklist. Local only — not in the public repo,
