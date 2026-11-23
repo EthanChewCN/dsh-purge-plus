@@ -99,6 +99,9 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 运行时钩子 | 10 个事件 | **13 个事件** | 按需 |
 | 宿主写入提权 | 无 | **`ensureHostWritable` 四件套** | 已列入路线图 |
 | 演练台 | 10 tab | 12 tab + 6 分组 | **11 tab**（已并入「凭据与文件」）；6 分组导航在路线图 |
+| 技能库 | 23 个 | 40 个 | **40 个**（23 + safe 独有 17，逐条核对工具引用） |
+| 团队任务板 | 无 | 默认开（根会话） | **已移植**（team-mode + ticket-stage / team-board / orchestrator-clock / slot-state） |
+| 情报数据层 | 无 | KEV / CVE 底库 / 云同步 | **已移植**（kev / cve-db / intel-sync；数据不随包发，未配 `REDTEAM_INTEL_BASE` 即关闭） |
 
 ### 为什么不整包用 safe
 

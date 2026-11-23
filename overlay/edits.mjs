@@ -95,7 +95,8 @@ export function buildEdits(repo = resolveRepo()) {
       find: 'import * as core from "./core.js";',
       replace:
         'import * as core from "./core.js";\n' +
-        'import { installSubagentFence } from "./subagent-fence.js"; // [dsh-purge-plus]',
+        'import { installSubagentFence } from "./subagent-fence.js"; // [dsh-purge-plus]\n' +
+        'import { installPlusCapabilities } from "./plus-capabilities.js"; // [dsh-purge-plus] 能力接线层',
     },
     // 状态目录（~/.dsh/dsh-purge-community/）**故意不改**：
     //   那里存着已有补丁基线、audit.jsonl、preset-migrations。
@@ -124,7 +125,10 @@ export function buildEdits(repo = resolveRepo()) {
         "  const cfg = { ...DEFAULTS, ...(config || {}) };\n" +
         "  // [dsh-purge-plus] 叶子节点围栏（来源 safe tool-gate.denyDelegation）。\n" +
         "  // 与 #9/#59 的源码补丁不重叠：那两条管审批与审核放行，这条只管子代理别再派活。\n" +
-        "  try { installSubagentFence(ctx, cfg); } catch { /* 老宿主无 tools/pre-execute */ }",
+        "  try { installSubagentFence(ctx, cfg); } catch { /* 老宿主无 tools/pre-execute */ }\n" +
+        "  // [dsh-purge-plus] safe 能力接线：team-mode（红队根会话默认开任务板）+\n" +
+        "  // preset-default（停用/热重载时清 selectedDefault）。逐项 try/catch，一项失败不影响启动。\n" +
+        "  try { installPlusCapabilities(ctx, cfg); } catch { /* 能力层可选 */ }",
     },
 
     // ══ D. 在线更新通道：从 community 的发布源改指本仓库 ══════════════

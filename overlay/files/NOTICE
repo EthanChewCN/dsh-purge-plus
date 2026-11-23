@@ -1,0 +1,16 @@
+dsh-purge-plus
+Copyright (c) 2026 dsh-purge-plus contributors
+
+This product bundles and modifies third-party material. The MIT license in
+LICENSE applies to the original portions of dsh-purge-plus only; vendored
+material remains under its own terms:
+
+  vendor/community/            MIT, Copyright (c) 2026 kingcharleslzy-ai
+  vendor/safe/                 Apache License 2.0, Copyright 2026 CallMeGuLab
+  overlay/files/LICENSE-SAFE-APACHE-2.0.txt   full text of the Apache License 2.0
+  overlay/files/NOTICE-SAFE.txt               upstream NOTICE, reproduced verbatim
+
+Per-file change records required by Apache-2.0 section 4(b), and the full
+attribution chain, are in overlay/files/NOTICE-PLUS.md.
+
+Neither upstream project endorses this repository. See README.md for scope.

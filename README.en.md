@@ -98,6 +98,9 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 | Runtime hooks | 10 events | **13 events** | on demand |
 | Host write elevation | none | **`ensureHostWritable` suite** | on the roadmap |
 | Drill desk | 10 tabs | **12 tabs + 6 groups** | on the roadmap |
+| Skill library | 23 | 40 | **40** (23 + safe's 17, every tool reference checked) |
+| Team task board | none | on by default (root session) | **ported** (team-mode + ticket-stage / team-board / orchestrator-clock / slot-state) |
+| Intel data layer | none | KEV / CVE base DB / cloud sync | **ported** (kev / cve-db / intel-sync; data not shipped, off unless `REDTEAM_INTEL_BASE` is set) |
 
 ### Why not ship safe wholesale
 

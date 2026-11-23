@@ -1159,7 +1159,7 @@ pkg.plus = {
   },
 };
 // Apache-2.0 §4(a)(c)(d)：许可全文与 NOTICE 必须随发行物走。
-for (const extra of ["NOTICE-PLUS.md", "NOTICE-SAFE.txt", "LICENSE-SAFE-APACHE-2.0.txt"]) {
+for (const extra of ["NOTICE-PLUS.md", "NOTICE-SAFE.txt", "LICENSE-SAFE-APACHE-2.0.txt", "LICENSE-PLUS.txt", "NOTICE"]) {
   if (Array.isArray(pkg.files) && !pkg.files.includes(extra)) pkg.files.push(extra);
 }
 // [dsh-purge-plus] 剔除装配包里的死脚本。

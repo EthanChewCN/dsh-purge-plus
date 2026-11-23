@@ -119,18 +119,20 @@ community 的 redteam 模块派生自第三方，本仓库随副本一并继承�
 ### safe 独有面全量对照（2026-11-23 实测，非估计）
 
 `safe` 相对 `community` 独有 **27 个 lib 文件 + 17 个技能**（community 独有技能 0 个）。
-逐个定性如下 —— 「未移植」是结论，理由必须写清，否则下一个人会以为漏了：
+逐组定性如下 —— 每一行的「已移植 / 不移植」都带判据，否则下一个人会以为漏了：
 
 | 组 | 文件 | 处理与理由 |
 | :--- | :--- | :--- |
+| **技能** | 17 个 `skills/redteam/*.md` | **已移植**（v0.1.50）。文本层，不依赖宿主接口。落地后技能库 23 → 40，`redteam_*` 引用逐个核对已注册工具（38 个全部命中）。另修掉上游一处错名：`passive-recon.md` 让智能体调 `redteam_asset_upsert`，实际工具名是 `redteam_asset_add`。`lateral-movement.md` 取的是 community 版本（safe 版要求向目标机写入长期有效 SSH 密钥且无回收要求，本项目不采用该节） |
+| **预设默认** | `lib/preset-default.js` | **已移植**（v0.1.50）。上一版判断「装配包内 selectedDefault 零引用，没有可修的路径」是错的：宿主 `agent-preset-registry` 自己就有 `selectedDefault`，用户把「红队模式」设为默认后停用插件，宿主 `resolve()` 对未知预设硬抛（上游 #108）。这条与「包内有没有引用」无关 |
+| **团队任务板** | `team-mode.js`、`ticket-stage.js`、`team-board.js`、`orchestrator-clock.js`、`slot-state.js` | **已移植**（v0.1.50）。`team-mode` 已接进 apply（红队根会话默认开任务板，三条边界由模块自守：只写根会话、只写一次、只对红队会话写）；其余四个是零 ctx 依赖的叶子模块，供工具层与 UI 层按需 import |
+| **情报数据层** | `kev.js`、`cve-db.js`、`intel-sync.js` | **已移植**（v0.1.50）。`kev` 是 CISA 公告层缓存；`cve-db` 是 `kb/cve.db` 只读访问层（`node:sqlite`，宿主 Node 24 可用）；`intel-sync` 按 `REDTEAM_INTEL_BASE` 拉 `cve.db.gz`，**未配置数据源时按关闭处理**（上游同款语义）。数据不随包分发 |
 | 样式 | 16 个 `.css` | **不移植**。它们被 safe 自己的 `build-client.mjs` 读进 `PURGE_CSS` 嵌入其 client.js，不是死资产；但类名与 DOM 层级是 safe 面板的，本仓库基座没有对应结构，搬过来是零命中样式 |
 | 行为锚点 | `lib/anchor.js` | **不移植**。把明文锚点每轮置于 system prompt 尾部（order 10150）压过宿主 delegation；与 community 的 boost 属同类且更强，本仓库不引入第二套 |
-| 预设默认 | `lib/preset-default.js` | **不移植**。safe 专属路径：dispose 时清 `selectedDefault`，2.0.1 用 hold/sweep 修热重载误清。本仓库装配包内 `selectedDefault` **零引用**（实测 grep 无命中），没有这条代码路径可修 |
-| 子代理/工具门 | `lib/subagent-control.js`、`lib/tool-gate.js` | **不移植**。community 的源码补丁 `#9`/`#59` 已覆盖同一语义，重复移植会互相覆盖（见第 5 节） |
-| 演练台能力层 | `bootstrap-runtime.js`、`kev.js`、`slot-state.js`、`team-mode.js` | **未移植**。各需 UI 与状态层配套；本仓库的情报更新是自研的 `store-intel`（KEV + nuclei，带大小/超时/形状校验与原子落盘） |
-| 主题 / 全屏 | `ui-theme.js`、`ui-theme.css`、`ui-fullscreen.js` | **部分自研**。站内全屏在本仓库 overlay 里独立实现（`fullscreen-hook.js`），不依赖 safe 的 288 行 hook |
-| 设置 | `mnemon-settings.js` | **不移植**。safe 自有设置项，基座无对应宿主接口 |
-| 技能 | 17 个 `skills/redteam/*.md` | **不移植**。记账口径不同（safe 用 `score_hit`/`vuln_add`/`tunnel_add`，基座用 `redteam_chain_add`）；其中 `lateral-movement` 要求向目标机写入长期有效 SSH 密钥且全文无回收要求，与本项目边界纪律冲突 |
+| 子代理/工具门 | `lib/subagent-control.js`、`lib/tool-gate.js` | **不移植**。community 的源码补丁 `#9`/`#59` 已覆盖同一语义，重复移植会互相覆盖（见第 5 节开头） |
+| 运行时引导 | `bootstrap-runtime.js` | **不移植**。它铺的是 safe 自己的数据目录与 nuclei 模板；本仓库的情报更新是自研 `store-intel`（KEV + nuclei，带大小/超时/形状校验与原子落盘），重复实现会争同一批文件 |
+| 主题 / 全屏 | `ui-theme.js`、`ui-theme.css`、`ui-fullscreen.js` | **部分自研**。站内全屏在本仓库 overlay 里独立实现（`fullscreen-hook.js`），不依赖 safe 的 288 行 hook；主题是纯视觉皮肤，与基座 CSS 体系不同 |
+| 设置 | `mnemon-settings.js` | **不移植**。safe 自有设置项（`keepMnemon`），基座无对应宿主接口；留着是一个永远不会被读的开关 |
 
 ## 6. 本仓库自身
 

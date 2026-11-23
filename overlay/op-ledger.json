@@ -1,0 +1,71 @@
+{
+  "_comment": "本仓库在社区版 / safe 的 op 并集之外新增的 op。",
+  "_why": "「覆盖两家全部能力」的分母是后端 op（store-core 的 dispatch 是扁平 if 链，UI 只是它的消费者）。这个文件登记我们**多出来**的部分：多出来的每一条都必须有人认领、有测试、有界面出口，否则就是死代码。scripts/check-op-contract.mjs 会双向核对：产物里有而未登记的报错，登记了而产物里没有的也报错。",
+  "unionBaseline": {
+    "community": 72,
+    "safe": 84,
+    "note": "safe 的 dispatch 是 community 的严格超集（community-only 0 条），所以并集 = safe = 84。"
+  },
+  "ops": {
+    "deleteEngagement": {
+      "kind": "write",
+      "summary": "删除靶标：目录移到 .trash，必须显式 confirm:true。",
+      "why": "社区版与 safe 都只有「新建/切换」，建错了只能手动 rm 目录。",
+      "guard": "test-engagement-delete.mjs"
+    },
+    "sessionGraph": {
+      "kind": "read",
+      "summary": "会话/靶标关系图数据（节点 + 父子边 + 绑定关系）。",
+      "why": "safe 的 SessionMap 只读观察器缺 onPick 与 todos 通路，这里给它一条自己的取数路径。",
+      "guard": "test-session-graph（并入 test-p20.mjs）"
+    },
+    "evidenceLedger": {
+      "kind": "read",
+      "summary": "证据账本 + 未解决问题表，两张表各自独立取，一张坏掉不拖垮整页。",
+      "why": "community 独有 EvidenceLedger/UnknownRegistry，但**没有任何界面出口**。",
+      "guard": "test-evidence-ledger.mjs"
+    },
+    "reportV2": {
+      "kind": "read",
+      "summary": "四段式报告（概览/证据/凭据/结论），含截图引用与分组阈值。",
+      "why": "safe 的 ReportV2 只渲染三段且 data_proof 门槛差 100 倍；这里重写并修正门槛。",
+      "guard": "test-report-v2.mjs / test-report-v2-ui.mjs"
+    },
+    "cleanupSummary": {
+      "kind": "read",
+      "summary": "清理清单汇总（按状态/类型计数），供概览与角标使用。",
+      "why": "safe 有 cleanup/addCleanup/updateCleanup 三写一读，缺一个轻量汇总。",
+      "guard": "test-cleanup.mjs"
+    },
+    "assetCoverage": {
+      "kind": "read+write",
+      "summary": "资产维度的覆盖缺口：action=get 取一条，action=next 取下一批待办。",
+      "why": "两家的覆盖口径都只有总分，没有「这条资产还差什么」。",
+      "guard": "test-coverage.mjs"
+    },
+    "hostCoverage": {
+      "kind": "read+write",
+      "summary": "主机维度的覆盖缺口，形状与 assetCoverage 对称。",
+      "why": "同上；主机与资产是两套不同粒度的打分单位。",
+      "guard": "test-coverage.mjs"
+    },
+    "hostFinding": {
+      "kind": "read+write",
+      "summary": "主机侧发现（action=list/add/update），补 community 只有 web/asset 两级的缺口。",
+      "why": "内网横向拿到的服务器权限原本无处落库。",
+      "guard": "test-coverage.mjs"
+    },
+    "coverageSummary": {
+      "kind": "read",
+      "summary": "覆盖总览：资产/主机/发现三张表的汇总与缺口计数。",
+      "why": "概览页与角标共用一个数，避免各页各算一遍。",
+      "guard": "test-coverage.mjs"
+    },
+    "intelUpdate": {
+      "kind": "write(async)",
+      "summary": "情报库增量更新（target/dry_run/dest），异步、可干跑。",
+      "why": "safe 的 intelRefresh 只刷新不落地；这里补可干跑的更新入口。",
+      "guard": "test-composite-tools.mjs"
+    }
+  }
+}

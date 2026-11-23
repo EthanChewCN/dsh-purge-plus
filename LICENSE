@@ -19,18 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This license applies to the original portions of dsh-purge-plus only.
-
-Bundled or vendored third-party material is NOT covered by this license and
-remains under its own terms:
-
-  vendor/community/            MIT, Copyright (c) 2026 小杨
-  vendor/safe/                 Apache License 2.0, Copyright 2026 CallMeGuLab
-  docs/redteam-upstream-*      MIT, Copyright (c) 2026 Jueze-2019
-  test/fixtures/agent-loop-*   MIT, Copyright (c) 2026 DeepSeek
-
-See NOTICE-PLUS.md for the full attribution chain and the per-file change log
-required by Apache-2.0 section 4(b).

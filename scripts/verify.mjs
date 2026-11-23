@@ -1240,6 +1240,75 @@ console.log("[27] 装配包 scripts 路径存在");
     : bad(`scripts 引用了不存在的路径：${missingRefs.join(" · ")}`);
 }
 
+console.log("[28] op 契约（两家上游能力面 vs 产物）");
+{
+  // 「覆盖社区版与 safe 版的全部能力」的分母是后端 op，不是 UI：
+  // store-core 的 dispatch 是扁平 if 链，UI 只是它的消费者。这一组把分母
+  // 钉住 —— 上游新增一条 op 而产物没有，或 UI 写错一个 op 名，都在这里红，
+  // 而不是等用户看到空白页面。
+  let out = "";
+  let code = 0;
+  try {
+    out = execFileSync(process.execPath, [path.join(ROOT, "scripts", "check-op-contract.mjs")], {
+      cwd: ROOT, encoding: "utf8",
+    });
+  } catch (e) {
+    out = `${e.stdout || ""}${e.stderr || ""}`;
+    code = e.status ?? 1;
+  }
+  const cov = out.match(/覆盖 (\d+)\/(\d+)/);
+  const uni = out.match(/union (\d+)/);
+  code === 0
+    ? ok(`op 覆盖 ${cov ? cov[1] + "/" + cov[2] : "?"}（并集 ${uni ? uni[1] : "?"} 条）· UI 引用全部可解析`)
+    : bad(`op 契约不通过：${out.split("\n").filter((l) => l.startsWith("FAIL")).join(" · ") || out.trim()}`);
+  // 门禁本身必须能看见失败：三种变异在 check-op-contract 的用法说明里，这里只
+  // 断言它至少报出了一个数，避免脚本被改成 `exit 0` 的空壳还显示绿。
+  cov && uni ? null : bad("op 契约没有输出覆盖数字（脚本可能被改成空壳）");
+}
+
+// ── [29] safe 能力层移植（技能 / 叶子模块 / 接线） ────────────────
+// 三件事都是「加文件」型的改动，最容易出现的是**加了但没落地**或**落地了但没人用**。
+// 所以这里既查包内文件，也查引用链：技能文本里点名的工具必须真存在，
+// 移植模块必须被 import，否则就是死代码。
+{
+  console.log("[29] safe 能力层移植");
+  const pkgSkills = path.join(PKG, "skills", "redteam");
+  const names = fs.existsSync(pkgSkills) ? fs.readdirSync(pkgSkills).filter((f) => f.endsWith(".md")) : [];
+  names.length === 40
+    ? ok(`技能库 ${names.length} 个（community 23 + safe 独有 17）`)
+    : bad(`技能库 ${names.length} 个，期望 40`);
+
+  // 技能文本点名的工具必须在 tools.js 里注册；点错名字等于让智能体调一个不存在的工具。
+  const toolsSrc = fs.readFileSync(path.join(PKG, "lib/redteam/tools.js"), "utf8");
+  const registered = new Set([...toolsSrc.matchAll(/name:\s*'([a-z0-9_]+)'/g)].map((m) => m[1]));
+  const referenced = new Set();
+  for (const f of names) {
+    const text = fs.readFileSync(path.join(pkgSkills, f), "utf8");
+    for (const m of text.matchAll(/redteam_[a-z0-9_]+/g)) referenced.add(m[0]);
+  }
+  const missing = [...referenced].filter((t) => !registered.has(t));
+  missing.length === 0
+    ? ok(`技能引用的 ${referenced.size} 个工具全部已注册`)
+    : bad(`技能引用了未注册的工具：${missing.join(", ")}`);
+
+  // 移植的叶子模块：必须存在，且必须被 import（否则是死代码）。
+  const ported = ["slot-state", "ticket-stage", "team-board", "orchestrator-clock", "kev", "cve-db", "intel-sync", "team-mode"];
+  const absent = ported.filter((m) => !fs.existsSync(path.join(PKG, "lib/redteam", m + ".js")));
+  absent.length === 0 ? ok(`移植模块 ${ported.length} 个全部在包内`) : bad(`移植模块缺失：${absent.join(", ")}`);
+
+  const capSrc = fs.readFileSync(path.join(PKG, "lib/plus-capabilities.js"), "utf8");
+  const indexSrc = fs.readFileSync(path.join(PKG, "lib/index.js"), "utf8");
+  const wired = /installPlusCapabilities/.test(indexSrc) && /installTeamMode/.test(capSrc);
+  wired ? ok("能力接线层已挂进 apply（team-mode + preset-default）") : bad("能力接线层没有挂进 apply");
+
+  // Apache-2.0 §4(b)：改过的文件要带改动标注。移植件统一带来源行。
+  const unmarked = ported
+    .map((m) => path.join(PKG, "lib/redteam", m + ".js"))
+    .concat([path.join(PKG, "lib/preset-default.js")])
+    .filter((f) => !fs.readFileSync(f, "utf8").slice(0, 400).includes("[dsh-purge-plus]"));
+  unmarked.length === 0 ? ok("移植件均带来源标注（Apache-2.0 §4(b)）") : bad(`缺来源标注：${unmarked.map((f) => path.basename(f)).join(", ")}`);
+}
+
 console.log("");
 if (failed) { console.error(`验收失败：${failed} 项`); process.exit(1); }
 console.log("验收通过（本次全程只读，宿主未被修改）。");
