@@ -135,16 +135,33 @@ fork-and-edit 的第二次升级必死：上游一动，本地改动全变成冲
 
 - DSH Desktop **0.2.2-rc.5**（`0.2.2-rc.1` 起同样通过）
 - 已至少启动过一次 DSH，profile 已初始化
+- 平台：基座本身覆盖 macOS / Windows / Linux；本仓库的改动不分平台，但**只在 macOS 上实测过** ——
+  Windows / Linux 上用出问题请带日志开 issue，不要当成"应该没问题"
 - **先卸掉 `dsh-purge-community` 或 `dsh-purge-safe`** —— 三个包会往同一批宿主文件打补丁，`.dshpurge.bak` 基线会互相污染
 
-### 方式一：面板（推荐）
+### 方式零：下载发行包（不需要源码，推荐给使用者）
+
+1. 打开 [Releases](https://github.com/EthanChewCN/dsh-purge-plus/releases/latest)，
+   下载 **`dsh-purge-plus-<ver>.tgz`** 与 **`SHA256SUMS.txt`**；
+2. 校验（不一致就别装）：
+
+```bash
+shasum -a 256 -c SHA256SUMS.txt
+```
+
+3. DSH 面板 → **插件 → 从文件安装** → 选那个 tgz → 重启 DSH。
+
+发行包是纯 tarball（`dsh.install.preferred = "tarball"`），安装时不需要 git、不需要 npm 源。
+本仓库根目录**不是**一个可安装的包（没有 `package.json`），所以 `pnpm add git+…` 走不通 —— 请用发行包。
+
+### 方式一：从源码构建（给改代码的人）
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 11 组只读验收，不动宿主
+node scripts/verify.mjs     # 29 组只读验收，不动宿主
 ```
 
-然后 DSH 面板 → **插件 → 从文件安装** → 选 `dist/dsh-purge-plus-<ver>.tgz` → 重启 DSH。
+然后同上：面板 → 插件 → 从文件安装 → 选 `dist/dsh-purge-plus-<ver>.tgz` → 重启 DSH。
 
 ### 方式二：命令行
 

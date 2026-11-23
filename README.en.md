@@ -135,15 +135,31 @@ Here `vendor/` is always a verbatim upstream copy, and every change is "new file
 - DSH Desktop **0.2.2-rc.5** (anything from `0.2.2-rc.1` on also passes)
 - DSH started at least once so the profile is initialised
 - **Remove `dsh-purge-community` or `dsh-purge-safe` first** — all three patch the same host files and the `.dshpurge.bak` baselines would contaminate each other
+- Platform: the base supports macOS / Windows / Linux. Nothing here is platform-specific, but it is **only tested on macOS** — if it misbehaves elsewhere, open an issue with logs
 
-### Option 1: the panel (recommended)
+### Option 0: download the release (no source needed, recommended for users)
+
+1. Open [Releases](https://github.com/EthanChewCN/dsh-purge-plus/releases/latest) and download
+   **`dsh-purge-plus-<ver>.tgz`** plus **`SHA256SUMS.txt`**;
+2. verify (do not install on mismatch):
+
+```bash
+shasum -a 256 -c SHA256SUMS.txt
+```
+
+3. DSH panel → **Plugins → Install from file** → pick the tgz → restart DSH.
+
+The release is a plain tarball (`dsh.install.preferred = "tarball"`); installing needs neither git nor an npm registry.
+The repository root is **not** an installable package (there is no `package.json`), so `pnpm add git+…` does not work — use the release asset.
+
+### Option 1: build from source (for people changing the code)
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 11 read-only checks, host untouched
+node scripts/verify.mjs     # 29 read-only checks, host untouched
 ```
 
-Then DSH panel → **Plugins → Install from file** → pick `dist/dsh-purge-plus-<ver>.tgz` → restart DSH.
+Then as above: panel → Plugins → Install from file → pick `dist/dsh-purge-plus-<ver>.tgz` → restart DSH.
 
 ### Option 2: command line
 
