@@ -71,7 +71,9 @@ try {
   const onlyClone = b.filter((f) => !a.includes(f));
   const differing = [];
   for (const f of a.filter((x) => b.includes(x))) {
-    if (!fs.readFileSync(path.join(LOCAL, f)).equals(fs.readFileSync(path.join(clonePkg, f)))) differing.push(f);
+    /* package.json 里只有构建时刻不同（下面 digest 会剔除）。这里比 stableBytes，
+       否则永远有一行「字节不同：package.json」，真正的差异会淹在里面。 */
+    if (!stableBytes(f, path.join(LOCAL, f)).equals(stableBytes(f, path.join(clonePkg, f)))) differing.push(f);
   }
 
   const problems = [];
@@ -99,12 +101,25 @@ try {
   };
   const digest = (dir) => {
     const h = createHash("sha256");
-    for (const f of list(dir)) {
-      if (path.basename(f).startsWith("._")) continue;   // macOS AppleDouble
-      h.update(f + "\0");
-      h.update(createHash("sha256").update(stableBytes(f, path.join(dir, f))).digest("hex"));
-      h.update("\n");
-    }
+    /* 顺序必须与 build.mjs 的 contentDigest 一致：它是**逐层**排序后递归，
+       不是把相对路径整体排序（`a.txt` 与 `a/b` 两种排法结果不同）。
+       第一版用了整体排序，摘要与侧车对不上，被误报成「dist 落后于源码」。 */
+    const walk = (rel) => {
+      const abs = path.join(dir, rel);
+      const names = fs.readdirSync(abs, { withFileTypes: true }).map((d) => d.name).sort();
+      for (const name of names) {
+        if (name.startsWith("._")) continue;             // macOS AppleDouble
+        const childRel = rel ? rel + "/" + name : name;
+        const childAbs = path.join(dir, childRel);
+        if (fs.statSync(childAbs).isDirectory()) walk(childRel);
+        else {
+          h.update(childRel + "\0");
+          h.update(createHash("sha256").update(stableBytes(childRel, childAbs)).digest("hex"));
+          h.update("\n");
+        }
+      }
+    };
+    walk("");
     return h.digest("hex");
   };
   const dLocal = digest(LOCAL);
