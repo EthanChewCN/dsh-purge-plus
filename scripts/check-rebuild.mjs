@@ -53,6 +53,25 @@ try {
   const clonePkg = path.join(tmp, "dist", "build", "package");
   if (!fs.existsSync(clonePkg)) die("副本构建没有产出 dist/build/package");
 
+  /* 与 build.mjs 的 contentDigest **逐字同一套规则**（排序路径 + 每文件 sha256，
+     剔除构建时刻）。自己发明一套的代价本轮已经付过：第一版只剔了 dsh.generatedAt，
+     而字段其实在 plus.generatedAt 下 —— 于是这条判据对同一份产物报「摘要不同」，
+     差点被当成真的不一致。 */
+  const stableBytes = (rel, abs) => {
+    const buf = fs.readFileSync(abs);
+    if (rel !== "package.json") return buf;
+    try {
+      const parsed = JSON.parse(buf.toString("utf8"));
+      /* 构建时刻可能出现在顶层 / dsh / plus 任意一处，全部剔除 */
+      for (const holder of [parsed, parsed && parsed.dsh, parsed && parsed.plus]) {
+        if (holder && typeof holder === "object") delete holder.generatedAt;
+      }
+      return Buffer.from(JSON.stringify(parsed, null, 2) + "\n", "utf8");
+    } catch {
+      return buf;
+    }
+  };
+
   /* 逐文件比对：先比集合，再比字节。摘要相同还不够 —— 得说清是哪个文件不同。 */
   const list = (dir) => {
     const out = [];
@@ -81,24 +100,6 @@ try {
   if (onlyClone.length) problems.push(`只在克隆：${onlyClone.join("、")}`);
   if (differing.length) problems.push(`字节不同：${differing.join("、")}`);
 
-  /* 与 build.mjs 的 contentDigest **逐字同一套规则**（排序路径 + 每文件 sha256，
-     剔除构建时刻）。自己发明一套的代价本轮已经付过：第一版只剔了 dsh.generatedAt，
-     而字段其实在 plus.generatedAt 下 —— 于是这条判据对同一份产物报「摘要不同」，
-     差点被当成真的不一致。 */
-  const stableBytes = (rel, abs) => {
-    const buf = fs.readFileSync(abs);
-    if (rel !== "package.json") return buf;
-    try {
-      const parsed = JSON.parse(buf.toString("utf8"));
-      /* 构建时刻可能出现在顶层 / dsh / plus 任意一处，全部剔除 */
-      for (const holder of [parsed, parsed && parsed.dsh, parsed && parsed.plus]) {
-        if (holder && typeof holder === "object") delete holder.generatedAt;
-      }
-      return Buffer.from(JSON.stringify(parsed, null, 2) + "\n", "utf8");
-    } catch {
-      return buf;
-    }
-  };
   const digest = (dir) => {
     const h = createHash("sha256");
     /* 顺序必须与 build.mjs 的 contentDigest 一致：它是**逐层**排序后递归，
