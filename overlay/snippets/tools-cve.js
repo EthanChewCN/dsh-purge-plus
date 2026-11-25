@@ -39,6 +39,19 @@
       } catch (e) {
         return JSON.stringify({ ok: false, error: 'cve-db 模块加载失败：' + String((e && e.message) || e) }, null, 2)
       }
+      /* [dsh-purge-plus] KEV 公告层：底库没建时它是唯一的「这个洞有人在打吗」来源。
+         模块是 safe 2.0.2 原样移植（lib/redteam/kev.js），路径已与 store-core 的
+         intel/kev.json 统一，两种数据形状都认。 */
+      let kev = null
+      try {
+        kev = await import('./kev.js')
+      } catch { /* 公告层不可用不影响底库查询 */ }
+      const kevLookup = (ids) => {
+        try { return kev ? kev.lookupKev(root, ids) : [] } catch { return [] }
+      }
+      const kevStatusOf = () => {
+        try { return kev ? kev.kevStatus(root) : null } catch { return null }
+      }
       const status = (() => { try { return cve.cveDbStatus(root) } catch (e) { return { available: false, note: String((e && e.message) || e) } } })()
 
       const missing = () => JSON.stringify({
@@ -48,6 +61,9 @@
         how_to_build: '在插件目录跑 `node scripts/build-cve-db.mjs --install`（NVD 年度 feed + CISA KEV + EPSS，公开数据，约 240MB 下载）。',
         fallback: '没有底库时改用 redteam_poc_search（本机经验 + 本机 nuclei 模板），或直接 web_search。',
         status,
+        /* 底库没建时，KEV 公告层仍能回答「这个 CVE 有没有人在野利用」 */
+        kev: kevStatusOf(),
+        kev_hits: kevLookup(String((args && (args.cve || args.q)) || '')),
       }, null, 2)
 
       try {
@@ -58,6 +74,7 @@
             exploits: (() => { try { return cve.exploitStatus(root) } catch { return null } })(),
             templates: (() => { try { return cve.templateCatalogStatus(root) } catch { return null } })(),
             poc_github: (() => { try { return cve.pocGitHubStatus(root) } catch { return null } })(),
+            kev: kevStatusOf(),
           }
           if (!status.available) out.how_to_build = 'node scripts/build-cve-db.mjs --install'
           return JSON.stringify(out, null, 2)
@@ -69,8 +86,14 @@
           const ids = String((args && (args.cve || args.q)) || '')
           if (!ids.trim()) return JSON.stringify({ ok: false, error: 'get 需要 cve 参数（可多个）' }, null, 2)
           const rows = cve.lookupCve(root, ids)
+          /* 底库里的 kev 列来自建库时的 KEV 快照；公告层是最新的一份 —— 两者不一致时
+             以公告层为准并显式标出来，避免「底库说没人打、公告说有人在打」。 */
+          const hits = kevLookup(ids)
+          const hitSet = new Set(hits.map((h) => h.cve))
+          const annotated = rows.map((r) => ({ ...r, in_kev: hitSet.has(r.cve) || r.kev === true }))
           return JSON.stringify({
-            ok: true, count: rows.length, items: rows,
+            ok: true, count: annotated.length, items: annotated,
+            kev: hits.length ? hits : undefined,
             missing: String(ids).match(/CVE-\d{4}-\d{4,7}/gi)?.filter((id) => !rows.some((r) => r.cve === id.toUpperCase())) || [],
           }, null, 2)
         }

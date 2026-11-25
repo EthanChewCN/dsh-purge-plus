@@ -2741,6 +2741,1849 @@ export function buildEdits(repo = resolveRepo()) {
         "        ? { ok: true, current: store.activeEngagementId() }\n" +
         "        : { ok: false, error: `engagement not found: ${req.engagement}`, current: store.activeEngagementId() }\n",
     },
+
+    // ── 名额挂起（slot-state）：safe 2.0.2 的行为，本包原先只移植了模块没接线 ──
+    // 见 docs/audit/AUDIT-3WAY-2026-11-25.md §4。四条接线缺一条，parked 就永远是空集合：
+    //   ① 导入；② 实时并发扣掉挂起的；③ 子智能体结束摘标记；④ 回报 blocked/waiting 时挂起。
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find: "import { maxAgentsOf, DEFAULT_MAX_AGENTS, MAX_AGENTS_LIMIT } from './settings.js'\n",
+      replace:
+        "import { maxAgentsOf, DEFAULT_MAX_AGENTS, MAX_AGENTS_LIMIT } from './settings.js'\n" +
+        "/* [dsh-purge-plus] 名额挂起：工具层写、面板层读，共用一份（safe 2.0.2 slot-state.js） */\n" +
+        "import { isParked, parkAgent, unparkAgent } from './slot-state.js'\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "    const running = rows.filter((e) => e && e.kind === 'child' && e.activity === 'running')\n" +
+        "    return {\n" +
+        "      available: true,\n" +
+        "      running: running.length,\n" +
+        "      running_labels: running.map((e) => e.label || e.id).slice(0, 20),\n" +
+        "      total_children: rows.filter((e) => e && e.kind === 'child').length,\n" +
+        "    }\n",
+      replace:
+        "    const runningAll = rows.filter((e) => e && e.kind === 'child' && e.activity === 'running')\n" +
+        "    /* [dsh-purge-plus] 挂起（回报 blocked/waiting 等人）的不占名额：它没在干活，\n" +
+        "       占着名额等于把并发锁死。口径与 safe 2.0.2 tools.js:313 一致。 */\n" +
+        "    const running = runningAll.filter((e) => !isParked(rootSessionId, e.id))\n" +
+        "    const parkedRows = runningAll.filter((e) => isParked(rootSessionId, e.id))\n" +
+        "    return {\n" +
+        "      available: true,\n" +
+        "      running: running.length,\n" +
+        "      running_labels: running.map((e) => e.label || e.id).slice(0, 20),\n" +
+        "      parked: parkedRows.length,\n" +
+        "      parked_labels: parkedRows.map((e) => e.label || e.id).slice(0, 20),\n" +
+        "      total_children: rows.filter((e) => e && e.kind === 'child').length,\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "        const childId = info && info.id !== undefined ? String(info.id) : undefined\n" +
+        "        if (rootId === undefined) return\n",
+      replace:
+        "        const childId = info && info.id !== undefined ? String(info.id) : undefined\n" +
+        "        if (rootId === undefined) return\n" +
+        "        /* [dsh-purge-plus] 结束即摘挂起标记，否则同一 id 复活后会被误判成还在等 */\n" +
+        "        if (childId !== undefined) unparkAgent(rootId, childId)\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      action: { type: 'string', required: true, enum: ['status', 'acquire', 'release'], description: 'status 查看 / acquire 占用 / release 释放' },\n",
+      replace:
+        "      action: { type: 'string', required: true, enum: ['status', 'acquire', 'release'], description: 'status 查看 / acquire 占用 / release 释放' },\n" +
+        "      status: { type: 'string', enum: ['progress', 'ready', 'blocked', 'waiting'], description: '【只有执行子智能体填】blocked/waiting 表示在等人给 key/VPS/范围 —— 会**让出名额**，不占并发；progress/ready 收回名额。主会话不要填。' },\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      const live = await liveRunningChildren(ctx, owner)\n" +
+        "      const reserved = reservationList(owner)\n",
+      replace:
+        "      /* [dsh-purge-plus] 子智能体自报状态：在等人时让出名额（safe 2.0.2 tools.js:949）。\n" +
+        "         主会话填 status 一律拒绝 —— 它不占名额，填了只会把数字搅乱。 */\n" +
+        "      const selfChild = sessionId !== undefined && sessionId !== owner ? sessionId : undefined\n" +
+        "      const reportStatus = typeof args.status === 'string' ? args.status : ''\n" +
+        "      if (reportStatus !== '') {\n" +
+        "        if (selfChild === undefined) {\n" +
+        "          return JSON.stringify({ ok: false, error: 'status 只由执行子智能体填写；主会话用 label/key 操作名额。' }, null, 2)\n" +
+        "        }\n" +
+        "        if (reportStatus === 'blocked' || reportStatus === 'waiting') parkAgent(owner, selfChild)\n" +
+        "        else if (reportStatus === 'progress' || reportStatus === 'ready') unparkAgent(owner, selfChild)\n" +
+        "      }\n" +
+        "      const live = await liveRunningChildren(ctx, owner)\n" +
+        "      const reserved = reservationList(owner)\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find: "        running_from_registry: live.running,\n",
+      replace:
+        "        running_from_registry: live.running,\n" +
+        "        parked: live.parked ?? 0,\n" +
+        "        parked_labels: live.parked_labels ?? [],\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      const dropped = dropReservation(owner, typeof args.key === 'string' && args.key.trim() !== '' ? args.key.trim() : undefined)\n",
+      replace:
+        "      const wanted = typeof args.key === 'string' && args.key.trim() !== '' ? args.key.trim() : undefined\n" +
+        "      const dropped = dropReservation(owner, wanted)\n" +
+        "      /* 同一轮里 status=blocked/waiting 才刚挂起自己，这里不能顺手摘掉 */\n" +
+        "      const holding = reportStatus === 'blocked' || reportStatus === 'waiting'\n" +
+        "      if (selfChild !== undefined && !holding) unparkAgent(owner, selfChild)\n",
+    },
+    // ══ AB. 观察时钟 + 任务板合并接线（AUDIT-3WAY §4 的第 3、4 项）════════
+    // 两个模块此前只移植、从未接线。接线后多出两件真实能力：
+    //   ① stall 判定：ticket-stage 的 staleMs 分支原先永远走不到 —— 调用方既没传
+    //      staleMs，也没有任何地方产出 claimedAt；
+    //   ② 回报按 root+engagement 作用域匹配，不同根会话的同名 task-N 不互串。
+    // 时钟只在读任务板时推进（不起定时器）：面板轮询几次后判定才生效，
+    // 这一点写进返回值的 clock.advanced_by，不假装它是实时监控。
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "  let stageOf = null\n" +
+        "  try {\n" +
+        "    const mod = await import('./ticket-stage.js')\n" +
+        "    if (mod && typeof mod.taskStage === 'function') stageOf = mod.taskStage\n" +
+        "  } catch { stageOf = null }\n",
+      replace:
+        "  let stageOf = null\n" +
+        "  try {\n" +
+        "    const mod = await import('./ticket-stage.js')\n" +
+        "    if (mod && typeof mod.taskStage === 'function') stageOf = mod.taskStage\n" +
+        "  } catch { stageOf = null }\n" +
+        "\n" +
+        "  /* [dsh-purge-plus] 观察时钟 + 任务板合并（safe 2.0.2 orchestrator-clock.js /\n" +
+        "     team-board.js）。两个模块原先只移植、没人 import —— 见 AUDIT-3WAY §4。 */\n" +
+        "  let clockMod = null\n" +
+        "  try {\n" +
+        "    const mod = await import('./orchestrator-clock.js')\n" +
+        "    if (mod && typeof mod.sweepStalled === 'function' && typeof mod.claimedAt === 'function') clockMod = mod\n" +
+        "  } catch { clockMod = null }\n" +
+        "  let boardMod = null\n" +
+        "  try {\n" +
+        "    const mod = await import('./team-board.js')\n" +
+        "    if (mod && typeof mod.mergeTeamBoardTasks === 'function') boardMod = mod\n" +
+        "  } catch { boardMod = null }\n" +
+        "\n" +
+        "  /* stall 阈值来自设置文件（与 maxAgents 同一个 settings.json）。\n" +
+        "     读不到/坏掉都退成「关闭」，绝不因为诊断项把任务板打挂。 */\n" +
+        "  let clockCfg = { minutes: 0, enabled: false }\n" +
+        "  if (clockMod) {\n" +
+        "    let settings = {}\n" +
+        "    try {\n" +
+        "      const mod = await import('./settings.js')\n" +
+        "      if (mod && typeof mod.readSettings === 'function') settings = mod.readSettings(store && store.root ? store.root : '.')\n" +
+        "    } catch { settings = {} }\n" +
+        "    clockCfg = clockMod.clockConfig(settings)\n" +
+        "  }\n" +
+        "\n" +
+        "  /* 快照补 root：team-board.js 用 root 做作用域键，缺了它 claimedAt 会退化成\n" +
+        "     「全局同名 task-N」——两个根会话各有一个 task-1 时会互相污染。 */\n" +
+        "  const boardTasks = keptTasks.map((task) => {\n" +
+        "    const row = Object.assign({}, task, { root: String(target.id) })\n" +
+        "    const r = reports && task.ownerId ? reports[String(task.ownerId)] : null\n" +
+        "    if (r && r.created_at) row.reportAt = r.created_at\n" +
+        "    return row\n" +
+        "  })\n" +
+        "  const boardById = new Map(boardTasks.map((row) => [String(row.id), row]))\n" +
+        "  const boardReports = reports === null ? [] : Object.keys(reports).map((sid) => {\n" +
+        "    const r = reports[sid]\n" +
+        "    return Object.assign({ root: String(target.id) }, r && typeof r === 'object' ? r : {})\n" +
+        "  })\n" +
+        "\n" +
+        "  const now = Date.now()\n" +
+        "  if (clockMod) {\n" +
+        "    /* 只记录「首次看到某条 in_progress 任务且没有回报」的时刻；不派活、不发消息。 */\n" +
+        "    try { clockMod.sweepStalled(boardTasks, clockCfg, now) } catch { /* 诊断时钟不影响主路径 */ }\n" +
+        "  }\n" +
+        "  let mergedRows = null\n" +
+        "  if (boardMod) {\n" +
+        "    try {\n" +
+        "      mergedRows = boardMod.mergeTeamBoardTasks(boardTasks, boardReports, {\n" +
+        "        claimedAt: clockMod ? (task) => clockMod.claimedAt(task) : undefined,\n" +
+        "        staleMs: clockCfg.enabled ? clockCfg.minutes * 60000 : 0,\n" +
+        "        now,\n" +
+        "      })\n" +
+        "    } catch { mergedRows = null }\n" +
+        "  }\n" +
+        "  const mergedById = new Map((Array.isArray(mergedRows) ? mergedRows : []).map((row) => [String(row.id), row]))\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "  const now = Date.now()\n" +
+        "  const items = (Array.isArray(hostView) ? hostView : keptTasks).map((task) => {\n" +
+        "    const report = (reports && task.ownerId) ? reports[String(task.ownerId)] || null : null\n" +
+        "    let stage = ''\n" +
+        "    let needs = []\n" +
+        "    let reason = ''\n" +
+        "    if (stageOf) {\n" +
+        "      try {\n" +
+        "        const got = stageOf({ task, report, tasks: allTasks, now })\n" +
+        "        stage = String(got.stage || '')\n" +
+        "        needs = Array.isArray(got.needs) ? got.needs : []\n" +
+        "        reason = String(got.reason || '')\n" +
+        "      } catch { stage = '' }\n" +
+        "    }\n",
+      replace:
+        "  const items = (Array.isArray(hostView) ? hostView : keptTasks).map((task) => {\n" +
+        "    const report = (reports && task.ownerId) ? reports[String(task.ownerId)] || null : null\n" +
+        "    /* 优先用 team-board.js 的合并结果；模块缺失才退回内联的 ticket-stage 调用。 */\n" +
+        "    const merged = mergedById.get(String(task.id)) || null\n" +
+        "    const boardRow = boardById.get(String(task.id)) || task\n" +
+        "    let stage = ''\n" +
+        "    let needs = []\n" +
+        "    let reason = ''\n" +
+        "    let mergedReportAt = ''\n" +
+        "    let linkedBy = ''\n" +
+        "    if (merged) {\n" +
+        "      stage = String(merged.stage || '')\n" +
+        "      needs = Array.isArray(merged.needs) ? merged.needs : []\n" +
+        "      reason = String(merged.stageReason || '')\n" +
+        "      mergedReportAt = merged.reportAt ? String(merged.reportAt) : ''\n" +
+        "      linkedBy = merged.reportLinkedBy ? String(merged.reportLinkedBy) : ''\n" +
+        "    } else if (stageOf) {\n" +
+        "      try {\n" +
+        "        const got = stageOf({\n" +
+        "          task: boardRow,\n" +
+        "          report,\n" +
+        "          tasks: boardTasks,\n" +
+        "          now,\n" +
+        "          staleMs: clockCfg.enabled ? clockCfg.minutes * 60000 : 0,\n" +
+        "          claimedAt: clockMod ? clockMod.claimedAt(boardRow) : NaN,\n" +
+        "        })\n" +
+        "        stage = String(got.stage || '')\n" +
+        "        needs = Array.isArray(got.needs) ? got.needs : []\n" +
+        "        reason = String(got.reason || '')\n" +
+        "      } catch { stage = '' }\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "    if (!stage) stage = readyOf(task) ? 'idle' : 'queued'\n" +
+        "    return {\n",
+      replace:
+        "    if (!stage) stage = readyOf(task) ? 'idle' : 'queued'\n" +
+        "    /* stall 单独算一次，不靠 reason 文案匹配：判据是「in_progress + 没有回报 +\n" +
+        "       首次观察至今 ≥ staleMs」，与 ticket-stage 里那条分支同源。 */\n" +
+        "    let stalled = false\n" +
+        "    if (clockMod && clockCfg.enabled && task.status === 'in_progress' && !report) {\n" +
+        "      const since = clockMod.claimedAt(boardRow)\n" +
+        "      if (Number.isFinite(since) && now - since >= clockCfg.minutes * 60000) stalled = true\n" +
+        "    }\n" +
+        "    return {\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find: "      report_at: report ? String(report.created_at || '') : '',\n",
+      replace:
+        "      report_at: mergedReportAt || (report ? String(report.created_at || '') : ''),\n" +
+        "      report_linked_by: linkedBy,\n" +
+        "      stalled,\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find: "    waiting_person: items.filter((t) => t.stage.indexOf('person/') === 0).length,\n  }\n",
+      replace:
+        "    waiting_person: items.filter((t) => t.stage.indexOf('person/') === 0).length,\n" +
+        "    stalled: items.filter((t) => t.stalled === true).length,\n" +
+        "  }\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "    view_source: Array.isArray(hostView) ? 'host' : 'projection',\n" +
+        "    reports_available: reports !== null,\n",
+      replace:
+        "    view_source: Array.isArray(hostView) ? 'host' : 'projection',\n" +
+        "    /* 派生字段从哪来：team-board.js（含 stall）/ ticket-stage（退回）/ none（都缺） */\n" +
+        "    stage_source: mergedRows ? 'team-board' : (stageOf ? 'ticket-stage' : 'none'),\n" +
+        "    clock: {\n" +
+        "      enabled: clockCfg.enabled,\n" +
+        "      minutes: clockCfg.minutes,\n" +
+        "      stale_ms: clockCfg.enabled ? clockCfg.minutes * 60000 : 0,\n" +
+        "      /* 时钟只在读任务板时推进，不额外起定时器：面板轮询几次后 stall 才判得出来。 */\n" +
+        "      advanced_by: 'teamBoard',\n" +
+        "    },\n" +
+        "    reports_available: reports !== null,\n",
+    },
+
+    // ══ AC. CVE 底库远端同步接线（AUDIT-3WAY §4 的第 5 项）═══════════════
+    // 审计当时判 intel-sync.js 为「冗余，可删」。逐行读过之后这个判断是错的：
+    //   · store-intel-net.js 下载的是 CISA KEV + nuclei 模板；
+    //   · intel-sync.js 同步的是 **cve.db.gz 整库**（清单 → sha256 → 解压校验 → 原子顶替）。
+    // 两件事不重叠。本包原先只有「本地构建底库」（scripts/build-cve-db.mjs），
+    // 没有任何「换一份新的」的路径 —— 所以正确做法是接线，不是删除。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "import { EvidenceLedger, UnknownRegistry } from './evidence-ledger.mjs'\n",
+      replace:
+        "import { EvidenceLedger, UnknownRegistry } from './evidence-ledger.mjs'\n" +
+        "/* [dsh-purge-plus] CVE 底库远端同步（safe 2.0.2 intel-sync.js）：清单 → sha256 →\n" +
+        "   解压校验 → 原子顶替。与 store-intel-net（KEV / nuclei 模板）不是同一件事。 */\n" +
+        "import { intelSyncStatus, syncIntel } from './intel-sync.js'\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "      missing_count: missingCount,\n",
+      replace:
+        "      missing_count: missingCount,\n" +
+        "      /* CVE 底库的同步状态：只读本机状态文件，**不联网**（与 intelStatus 的定位一致）。 */\n" +
+        "      cve_sync: intelSyncStatus(this.root),\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  async intelUpdate(target, options = {}) {\n" +
+        "    const want = String(target || 'all').trim()\n" +
+        "    const keys = want === 'all' ? ['kev', 'nuclei'] : [want]\n",
+      replace:
+        "  async intelUpdate(target, options = {}) {\n" +
+        "    const want = String(target || 'all').trim()\n" +
+        "    const keys = want === 'all' ? ['kev', 'nuclei', 'cve'] : [want]\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      else if (key === 'nuclei') results.push(await this.#updateNuclei(options))\n" +
+        "      else if (key === 'wordlists') {\n",
+      replace:
+        "      else if (key === 'nuclei') results.push(await this.#updateNuclei(options))\n" +
+        "      else if (key === 'cve') results.push(await this.#updateCveDb(options))\n" +
+        "      else if (key === 'wordlists') {\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "        results.push({ key: key, action: 'failed', error: '未知资源：' + key + '（kev/nuclei/wordlists/all）' })\n",
+      replace: "        results.push({ key: key, action: 'failed', error: '未知资源：' + key + '（kev/nuclei/cve/wordlists/all）' })\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "  async #updateKev(options = {}) {\n",
+      replace:
+        "  /**\n" +
+        "   * CVE 底库整体替换（safe 2.0.2 intel-sync.js）。\n" +
+        "   *\n" +
+        "   * 纪律全在 syncIntel 里：sha256 与体积双校验、先解压到临时文件再验 SQLite\n" +
+        "   * 结构、最后 rename 原子顶替；任何一步失败都保留旧库。这里只负责把它接进\n" +
+        "   * intelUpdate 的 results 形状，并记一行更新日志。\n" +
+        "   *\n" +
+        "   * 没有配 REDTEAM_INTEL_BASE 时返回 skipped/disabled —— 不猜数据源，也不报错。\n" +
+        "   */\n" +
+        "  async #updateCveDb(options = {}) {\n" +
+        "    try {\n" +
+        "      const got = await syncIntel(this.root, {\n" +
+        "        base: typeof options.base === 'string' && options.base ? options.base : undefined,\n" +
+        "        force: options.force === true,\n" +
+        "        dryRun: options.dry_run === true,\n" +
+        "        allowDowngrade: options.allow_downgrade === true,\n" +
+        "        timeoutMs: options.timeout_ms,\n" +
+        "      })\n" +
+        "      const action = got && got.action ? String(got.action) : 'failed'\n" +
+        "      this.#intelLog({ key: 'cve', action, reason: got && got.reason, bytes: got && got.bytes })\n" +
+        "      return Object.assign({ key: 'cve' }, got)\n" +
+        "    } catch (error) {\n" +
+        "      const msg = String((error && error.message) || error)\n" +
+        "      this.#intelLog({ key: 'cve', action: 'failed', error: msg })\n" +
+        "      return { key: 'cve', action: 'failed', error: msg }\n" +
+        "    }\n" +
+        "  }\n" +
+        "\n" +
+        "  async #updateKev(options = {}) {\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      const out = await store.intelUpdate(req.target || 'all', {\n" +
+        "        dry_run: req.dry_run === true, dest: typeof req.dest === 'string' && req.dest ? req.dest : undefined,\n" +
+        "      })\n",
+      replace:
+        "      const out = await store.intelUpdate(req.target || 'all', {\n" +
+        "        dry_run: req.dry_run === true, dest: typeof req.dest === 'string' && req.dest ? req.dest : undefined,\n" +
+        "        /* cve 底库专用：base 是自托管镜像地址，force 忽略节流与「本地更新」判断 */\n" +
+        "        base: typeof req.base === 'string' && req.base ? req.base : undefined,\n" +
+        "        force: req.force === true,\n" +
+        "        allow_downgrade: req.allow_downgrade === true,\n" +
+        "      })\n",
+    },
+    {
+      /* 两个工具（redteam_intel 与 composite 版）各有一份同名参数，锚点必须带上下文区分。 */
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      target: { type: 'string', description: 'update 时刷哪个：kev / nuclei / all，默认 all' },\n" +
+        "      dry_run: { type: 'boolean', description: 'update 时只校验、不落盘' },\n" +
+        "    },\n",
+      replace:
+        "      target: { type: 'string', description: 'update 时刷哪个：kev / nuclei / cve（整库，需配 REDTEAM_INTEL_BASE）/ all，默认 all' },\n" +
+        "      dry_run: { type: 'boolean', description: 'update 时只校验、不落盘' },\n" +
+        "    },\n",
+      count: 2,
+    },
+    // 代理池工具：与 12 个 op 同一套方法，智能体侧不用自己拼 op 名。
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find: "  ctx.tools.register(withStructuredErrors(defineTool({\n    name: 'redteam_engagement_open',",
+      replace: SNIP("tools-proxy.js") + "\n  ctx.tools.register(withStructuredErrors(defineTool({\n    name: 'redteam_engagement_open',",
+    },
+
+    // toolFilter 的剥离统一交给 safe 那一版。
+    // 基座这版只跳「`- ` 开头」和「`deny:`」，`allow:` 会被留下 —— 结果是
+    // `toolFilter:` 键没了、它的子键还在 config 里，等于把「整份预设 registered-broken」
+    // 换成了「一个未知配置键」。而且它先跑，safe 的 stripDeprecatedToolFilter 就再也
+    // 看不到 `toolFilter:`，永远不会触发。
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find:
+        "function repairToolFilter(text) {\n" +
+        "  const source = String(text || '');\n" +
+        "  if (!source.includes('toolFilter')) return { text: source, changed: false };\n" +
+        "  const kept = [];\n" +
+        "  let skipping = false;\n" +
+        "  for (const line of source.split('\\n')) {\n" +
+        "    if (/^\\s*toolFilter:\\s*$/.test(line)) {\n" +
+        "      skipping = true;\n" +
+        "      continue;\n" +
+        "    }\n" +
+        "    if (skipping) {\n" +
+        "      if (/^\\s*deny:\\s*$/.test(line) || /^\\s*-\\s/.test(line) || line.trim() === '') continue;\n" +
+        "      skipping = false;\n" +
+        "    }\n" +
+        "    kept.push(line);\n" +
+        "  }\n" +
+        "  return { text: kept.join('\\n'), changed: true };\n" +
+        "}\n",
+      replace:
+        "/**\n" +
+        " * [dsh-purge-plus] 剥离 toolFilter —— 统一走 safe 的 stripDeprecatedToolFilter。\n" +
+        " *\n" +
+        " * 基座这一版按「`- ` 开头」和「`deny:`」判子键，`allow:` 不在其列，于是\n" +
+        " * `toolFilter:` 被摘掉、`allow:` 却留在 config 里：从「整份预设 registered-broken」\n" +
+        " * 变成「一个未知配置键」，而 safe 的 stripDeprecatedToolFilter 因为看不到\n" +
+        " * `toolFilter:` 永远不会触发。两版按缩进跳过的规则必须只有一处。\n" +
+        " */\n" +
+        "function repairToolFilter(text) {\n" +
+        "  return stripDeprecatedToolFilter(text)\n" +
+        "}\n",
+    },
+
+    // 老预设里的工具包名映射到**本包**坐标。
+    // 基座这里写的是 `dsh-purge-community/redteam/tools` —— 那是 community 自己的名字，
+    // 在本包里解析不到（包名是 dsh-purge-plus），老用户升级上来后 tools 行会直接失效。
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      count: 2,
+      find: "'dsh-purge-community/redteam/tools'",
+      replace: "'dsh-purge-plus/redteam/tools'",
+    },
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find: "+ '工具包名已改为 dsh-purge-community/redteam/tools'",
+      replace: "+ '工具包名已改为 dsh-purge-plus/redteam/tools'",
+    },
+
+    // ══ AE. 预设自愈（safe 2.0.2 lib/redteam/index.js 的 6 段修复）══════════
+    // 本包的 apply 原先在「预设已存在」时直接 kept —— 自愈代码存在，但**永远走不到**。
+    // 宿主每次升级都会让已部署的红队预设半失效（toolFilter 废弃 / list_agents 子路径
+    // 没了 / workflow 行指向不存在的包 / 子代理不许选模型 / 缺 tool-schedule 行）。
+    // 下面四步：① 基座那段改名成 Core；② 去掉 list-agents 的强制启用（会与自愈打架）；
+    //          ③ 插入 safe 的 6 段 + 组合入口；④ apply 去掉 kept 捷径。
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find: "function repairDelegation(text) {\n",
+      replace: "function repairDelegationCore(text) {\n",
+    },
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find:
+        "  for (const id of [\n" +
+        "    \"tool-subagent-control\",\n" +
+        "    \"tool-subagent-list-agents\",\n" +
+        "    \"tool-subagent\",\n" +
+        "    \"tool-subagent-fork\",\n" +
+        "  ]) {\n",
+      replace:
+        "  /* [dsh-purge-plus] tool-subagent-list-agents 不在这里强制启用：它的去留由\n" +
+        "     disableUnavailableListAgents 按「宿主是否导出该子路径」决定。两处都管会互相\n" +
+        "     覆盖，结果是每次启动都报 repaired 并重写一次盘（safe 2.0.2 的原注释）。 */\n" +
+        "  for (const id of [\n" +
+        "    \"tool-subagent-control\",\n" +
+        "    \"tool-subagent\",\n" +
+        "    \"tool-subagent-fork\",\n" +
+        "  ]) {\n",
+    },
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find: "import { fileURLToPath } from 'node:url'\n",
+      replace:
+        "import { fileURLToPath } from 'node:url'\n" +
+        "/* [dsh-purge-plus] 预设自愈需要按宿主真实安装位置解析包（createRequire）\n" +
+        "   与解析可执行文件真实路径（realpathSync） */\n" +
+        "import { createRequire } from 'node:module'\n",
+    },
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find: "import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'\n",
+      replace: "import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'\n",
+    },
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find: "export function installPreset(options = {}) {\n",
+      replace: SNIP("preset-repair.js") + "\nexport function installPreset(options = {}) {\n",
+    },
+    {
+      file: "lib/redteam/index.js",
+      required: true,
+      find:
+        "    const dir = join(userPresetRoot(), 'redteam')\n" +
+        "    const exists = existsSync(join(dir, 'agent.cordis.yml')) || existsSync(join(dir, 'preset.yml'))\n" +
+        "    if (exists && process.env.REDTEAM_PRESET_REFRESH !== '1') {\n" +
+        "      const skills = installBundledSkills()\n" +
+        "      result = { action: 'kept', dir, skillsDir: skills.path, skills: skills.copied }\n" +
+        "    } else {\n" +
+        "      result = installPreset({ force: process.env.REDTEAM_PRESET_REFRESH === '1',\n" +
+        "        log: (msg) => ctx.logger?.info?.('redteam-mode: ' + msg) })\n" +
+        "    }\n",
+      replace:
+        "    const dir = join(userPresetRoot(), 'redteam')\n" +
+        "    /* [dsh-purge-plus] 不再「已存在就 kept」。installPreset 在非 force 时**只做自愈**\n" +
+        "       （占位符 / 工具包名 / toolFilter / 子代理锁模型 / workflow 组合 / 定时行 /\n" +
+        "       任务板文案），不整份覆盖用户内容。原先的 kept 捷径让这段自愈永远走不到 ——\n" +
+        "       宿主一升级，已部署的预设就半失效，而且没有任何地方会告诉你。\n" +
+        "       ctx 传进去：组合修复要读宿主有没有 ptcRuntime 服务（读不到就退回包探测）。 */\n" +
+        "    result = installPreset({ force: process.env.REDTEAM_PRESET_REFRESH === '1', ctx,\n" +
+        "      log: (msg) => ctx.logger?.info?.('redteam-mode: ' + msg) })\n",
+    },
+
+    // ══ AD. 代理池子系统（12 个 op）═══════════════════════════════════
+    // safe 2.0.2 的代理池**只有前端**：12 个 op 在它的服务端 dispatch 里一条都不存在，
+    // 调用只会得到 `unknown op: proxyPoolGet`（AUDIT-3WAY-R3 §1 有复现）。
+    // 所以这一块是从零写的，字段名对齐 safe 前端以便将来直接接它那套界面。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "import { intelSyncStatus, syncIntel } from './intel-sync.js'\n",
+      replace:
+        "import { intelSyncStatus, syncIntel } from './intel-sync.js'\n" +
+        "/* [dsh-purge-plus] 代理配置解析（纯函数，零依赖）：Clash proxies / URI 列表 / base64 订阅 */\n" +
+        "import { parseProxyConfig } from './proxy-parse.js'\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "  /* ---------- 路径 ---------- */",
+      replace: SNIP("store-proxy.js") + "\n  /* ---------- 路径 ---------- */",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    /* 没选靶标时：提示词回内置默认；只读查询回空结果。不要抛英文 engagement required。 */\n",
+      replace: SNIP("store-proxy-ops.js") + "\n    /* 没选靶标时：提示词回内置默认；只读查询回空结果。不要抛英文 engagement required。 */\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "  return dispatch(store, req)\n}",
+      replace:
+        "  /* [dsh-purge-plus] 代理池：要真连 TCP 的 4 个 op。同步 dispatch 里做不了网络等待，\n" +
+        "     所以放异步路径；失败一律 ok:false + 原因，不返回「已连接」。 */\n" +
+        "  if (req.op === 'proxyProfileTest') {\n" +
+        "    try { return Object.assign({ ok: true }, await store.proxyProfileTest(req.id, { timeoutMs: req.timeout_ms })) }\n" +
+        "    catch (e) { return { ok: false, error: String((e && e.message) || e) } }\n" +
+        "  }\n" +
+        "  if (req.op === 'proxyPoolTest') {\n" +
+        "    try { return Object.assign({ ok: true }, await store.proxyPoolTest(req.ids, { timeoutMs: req.timeout_ms })) }\n" +
+        "    catch (e) { return { ok: false, error: String((e && e.message) || e) } }\n" +
+        "  }\n" +
+        "  if (req.op === 'proxyProfileConnect') {\n" +
+        "    try { return Object.assign({ ok: true }, await store.proxyProfileConnect(req.id, { timeoutMs: req.timeout_ms })) }\n" +
+        "    catch (e) { return { ok: false, error: String((e && e.message) || e) } }\n" +
+        "  }\n" +
+        "  if (req.op === 'proxyPoolConnect') {\n" +
+        "    try { return Object.assign({ ok: true }, await store.proxyPoolConnect({ ids: req.ids, timeoutMs: req.timeout_ms })) }\n" +
+        "    catch (e) { return { ok: false, error: String((e && e.message) || e) } }\n" +
+        "  }\n" +
+        "  return dispatch(store, req)\n}",
+    },
+    // ══ AF. 数据目录铺底（safe 2.0.2 bootstrap-runtime.js）═════════════════
+    // 666 行的编排：知识库 DDL、pocs/toolkit、平台配置、nuclei 模板三种协议
+    // （git/tar/zip）+ 多镜像回退、CISA KEV 保鲜。
+    // 本包把它接成 op：**默认只做本地那半**，下载必须显式 download:true ——
+    // 启动不该有不可见的出口动作（与上游 apply 里 background 下载的做法不同）。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "  return dispatch(store, req)\n}",
+      replace:
+        "  /* [dsh-purge-plus] 数据目录铺底：知识库 DDL / pocs / toolkit / 平台配置，\n" +
+        "     可选顺带下载 nuclei 模板（download:true）。默认不联网。 */\n" +
+        "  if (req.op === 'runtimeEnsure') {\n" +
+        "    try {\n" +
+        "      const mod = await import('./bootstrap-runtime.js')\n" +
+        "      const report = await mod.ensureRedteamRuntime({\n" +
+        "        download: req.download === true,\n" +
+        "        timeoutMs: Number(req.timeout_ms) > 0 ? Number(req.timeout_ms) : undefined,\n" +
+        "      })\n" +
+        "      return Object.assign({ ok: true }, report)\n" +
+        "    } catch (e) { return { ok: false, error: String((e && e.message) || e) } }\n" +
+        "  }\n" +
+        "  return dispatch(store, req)\n}",
+    },
+    // ══ AG. 尾部锚点 + mnemon 开关（safe 2.0.2 anchor.js / mnemon-settings.js）══
+    // anchor.js 需要 identity 的「是不是子会话」判据；基座没有导出它，
+    // 只有一份私有的 inheritsParentPrompt（要求有 parentSession，续接会话会误判）。
+    {
+      file: "lib/identity.js",
+      required: true,
+      find: "function inheritsParentPrompt(session) {\n",
+      replace:
+        "/**\n" +
+        " * [dsh-purge-plus] 子会话判据（safe 2.0.2 identity.js:476）。\n" +
+        " *\n" +
+        " * 只认委派来源 / 委派深度，**不看 parentSession** —— 从历史续接/分支出来的会话\n" +
+        " * 也带 parentSession，但那种会话自己是根，判成子会话会让它拿不到主锚点。\n" +
+        " */\n" +
+        "export function isChildAgentContext(context) {\n" +
+        "  const header = sessionOfContext(context)?.header\n" +
+        "  if (!header) return false\n" +
+        "  const origin = String(header.origin || '').toLowerCase()\n" +
+        "  if (origin === 'subagent' || origin === 'teammate' || origin === 'delegate') return true\n" +
+        "  return (header.delegationDepth ?? 0) > 0\n" +
+        "}\n" +
+        "\n" +
+        "function inheritsParentPrompt(session) {\n",
+    },
+    // mnemon 开关：identity 默认会把宿主的 mnemon（记忆层）那一段从注入里摘掉，
+    // 打开 keepMnemon 就保留它。两处 dropMnemon 都要走同一个开关。
+    {
+      file: "lib/identity.js",
+      required: true,
+      find: "import { CAPABILITY_SECTION, capabilityProtocolText } from \"./capability-protocol.js\";\n",
+      replace:
+        "import { CAPABILITY_SECTION, capabilityProtocolText } from \"./capability-protocol.js\";\n" +
+        "/* [dsh-purge-plus] mnemon 开关（safe 2.0.2 mnemon-settings.js） */\n" +
+        "import { loadMnemonSettings } from \"./mnemon-settings.js\";\n" +
+        "import { findDshHome } from \"./core.js\";\n",
+    },
+    {
+      file: "lib/identity.js",
+      required: true,
+      find:
+        "function normalizeRewriteOptions(fallbackInject, options) {\n" +
+        "  if (fallbackInject && typeof fallbackInject === \"object\" && !Array.isArray(fallbackInject)) {\n",
+      replace:
+        "function normalizeRewriteOptions(fallbackInject, options) {\n" +
+        "  /* 设置文件优先：keepMnemon=true 时无论调用方怎么说都保留 mnemon 段。\n" +
+        "     读不到就回退调用方的判断（绝不因为设置文件坏掉而改变默认行为）。 */\n" +
+        "  let mnemonKeep = null\n" +
+        "  try {\n" +
+        "    const home = findDshHome()\n" +
+        "    if (home) mnemonKeep = loadMnemonSettings(home).keepMnemon\n" +
+        "  } catch { /* 回退调用方 */ }\n" +
+        "  if (fallbackInject && typeof fallbackInject === \"object\" && !Array.isArray(fallbackInject)) {\n",
+    },
+    {
+      file: "lib/identity.js",
+      required: true,
+      find: "      dropMnemon: fallbackInject.dropMnemon !== false,\n",
+      replace: "      dropMnemon: mnemonKeep === true ? false : (fallbackInject.dropMnemon !== false),\n",
+    },
+    {
+      file: "lib/identity.js",
+      required: true,
+      find: "    dropMnemon: options?.dropMnemon !== false,\n",
+      replace: "    dropMnemon: mnemonKeep === true ? false : (options?.dropMnemon !== false),\n",
+    },
+    // mnemon 开关的读写 op（面板/工具不用手改 JSON）。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "  return dispatch(store, req)\n}",
+      replace:
+        "  /* [dsh-purge-plus] mnemon 开关：读/写 $DSH_HOME/dsh-purge-plus/mnemon.json。\n" +
+        "     keepMnemon=true 时 identity 的 prompt 改写会保留宿主的 mnemon（记忆层）那一段。 */\n" +
+        "  if (req.op === 'mnemonSettings') {\n" +
+        "    try {\n" +
+        "      const mod = await import('../mnemon-settings.js')\n" +
+        "      const home = process.env.DSH_HOME || join(homedir(), '.dsh')\n" +
+        "      if (req.keepMnemon === undefined) return Object.assign({ ok: true }, mod.loadMnemonSettings(home))\n" +
+        "      return Object.assign({ ok: true }, mod.saveMnemonSettings(home, { keepMnemon: req.keepMnemon === true }))\n" +
+        "    } catch (e) { return { ok: false, error: String((e && e.message) || e) } }\n" +
+        "  }\n" +
+        "  return dispatch(store, req)\n}",
+    },
+    // ══ AH. savePrompt：漏传 content 不等于「清空」 ══════════════════════
+    // safe 2.0.2 审计（R11-safe SF-03）实测：`{op:'savePrompt', engagement, role:'recon'}`
+    // 不传 content → `String(content ?? '')` 把 13KB 角色提示词写成 0 字节，
+    // 并且 manifest 里那条被删掉 → 此后永远判成「用户自写」，再也不会随版本自动升级。
+    // 一次字段名写错就永久毁掉一份提示词，且没有备份。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  savePrompt(id, role, content) {\n" +
+        "    if (!ROLE_TITLES[role]) throw new Error(`unknown role: ${role}`)\n",
+      replace:
+        "  savePrompt(id, role, content) {\n" +
+        "    if (!ROLE_TITLES[role]) throw new Error(`unknown role: ${role}`)\n" +
+        "    /* [dsh-purge-plus] 漏传 content ≠ 清空：`undefined` 会把整份角色提示词写成 0 字节，\n" +
+        "       并删掉 manifest 里那条，之后永远判成「用户自写」、不再随版本升级。\n" +
+        "       要清空请显式传空串。 */\n" +
+        "    if (content === undefined) throw new Error('savePrompt 需要 content（要清空请显式传空字符串）')\n",
+    },
+    // ══ AI. 覆盖度查不出来 ≠ 没有缺口 ══════════════════════════════════
+    // 原实现把 hostNextActions / assetNextActions 的异常 catch 成 0，而 coverage_available
+    // 仍然是 true。一次表损坏就能让面板与 redteam_attention 同时宣布
+    // 「没有人等、也没有队列缺口：这一轮打完了」—— 操作者会提前收工。
+    // 实测（R11-ours PL-01）：把 asset_coverage 改名后，pending_coverage 从 1 变 0、note 变成「打完了」。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const coverage = (() => {\n" +
+        "      const fns = ['hostNextActions', 'assetNextActions']\n" +
+        "      const present = fns.filter((fn) => typeof this[fn] === 'function')\n" +
+        "      if (present.length === 0) return { available: false, pending: 0 }\n" +
+        "      let pending = 0\n" +
+        "      for (const fn of present) {\n" +
+        "        try { pending += Number(this[fn](id, { limit: 1 }).total) || 0 } catch { /* 单个失败不影响另一个 */ }\n" +
+        "      }\n" +
+        "      return { available: present.length === fns.length, pending }\n" +
+        "    })()\n",
+      replace:
+        "    const coverage = (() => {\n" +
+        "      const fns = ['hostNextActions', 'assetNextActions']\n" +
+        "      const present = fns.filter((fn) => typeof this[fn] === 'function')\n" +
+        "      if (present.length === 0) return { available: false, engine: false, pending: 0, error: '' }\n" +
+        "      /* [dsh-purge-plus] 查不出来 ≠ 没有缺口：把失败单独收集，available 跟着变 false。\n" +
+        "         单个队列失败不拖累另一个，但整条结论不再声称「收口了」。 */\n" +
+        "      let pending = 0\n" +
+        "      const errors = []\n" +
+        "      for (const fn of present) {\n" +
+        "        try { pending += Number(this[fn](id, { limit: 1 }).total) || 0 } catch (e) { errors.push(fn + ': ' + String((e && e.message) || e)) }\n" +
+        "      }\n" +
+        "      return { available: present.length === fns.length && errors.length === 0, engine: true, pending, error: errors.join('; ') }\n" +
+        "    })()\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      ? (coverage.pending > 0\n" +
+        "        ? '没有智能体在等人，但还有 ' + coverage.pending + ' 个覆盖度缺口 —— 该派下一个智能体了。'\n" +
+        "        : coverage.available\n" +
+        "          ? '没有人等、也没有队列缺口：这一轮打完了。'\n" +
+        "          : '没有人等。覆盖度引擎未移植，无法判断是否还有缺口 —— 这条结论只覆盖「智能体回报」这一路。')\n",
+      replace:
+        "      ? (coverage.pending > 0\n" +
+        "        ? '没有智能体在等人，但还有 ' + coverage.pending + ' 个覆盖度缺口 —— 该派下一个智能体了。'\n" +
+        "        : coverage.available\n" +
+        "          ? '没有人等、也没有队列缺口：这一轮打完了。'\n" +
+        "          : coverage.engine === false\n" +
+        "            ? '没有人等。覆盖度引擎未移植，无法判断是否还有缺口 —— 这条结论只覆盖「智能体回报」这一路。'\n" +
+        "            : '没有人等，但**覆盖度查不出来**（' + (coverage.error || '未知错误') + '）：不能据此认为这一轮打完了。')\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  coveragePending(id) {\n" +
+        "    const out = { external: 0, internal: 0, total: 0 }\n" +
+        "    try { out.external = Number(this.assetNextActions(id, { limit: 30 }).total) || 0 } catch { out.external = 0 }\n" +
+        "    try { out.internal = Number(this.hostNextActions(id, { limit: 30 }).total) || 0 } catch { out.internal = 0 }\n" +
+        "    out.total = out.external + out.internal\n" +
+        "    return out\n" +
+        "  }\n",
+      replace:
+        "  coveragePending(id) {\n" +
+        "    /* [dsh-purge-plus] 同上：把「查不出来」和「没有缺口」分开。\n" +
+        "       返回里的 ok=false 时 total 不能当成 0 用。 */\n" +
+        "    const out = { external: 0, internal: 0, total: 0, ok: true, error: '' }\n" +
+        "    const errors = []\n" +
+        "    try { out.external = Number(this.assetNextActions(id, { limit: 30 }).total) || 0 } catch (e) { out.external = 0; errors.push('asset: ' + String((e && e.message) || e)) }\n" +
+        "    try { out.internal = Number(this.hostNextActions(id, { limit: 30 }).total) || 0 } catch (e) { out.internal = 0; errors.push('host: ' + String((e && e.message) || e)) }\n" +
+        "    out.total = out.external + out.internal\n" +
+        "    out.ok = errors.length === 0\n" +
+        "    out.error = errors.join('; ')\n" +
+        "    return out\n" +
+        "  }\n",
+    },
+    // ══ AJ. 覆盖度：一个定义 + 失败可被 UI 看见 ══════════════════════════
+    // 上一笔（AI）只修了 attention 的结论句，还有三处漏的（R11-ours 复核指出）：
+    //   (a) 首页卡片读 cov.pending.total，查询失败时仍显示「待办缺口 0」；
+    //   (b) attentionQueue 内联重算了一遍 coveragePending，注释说「只有一个定义」是假的；
+    //   (c) 只看数字的调用方拿不到「不知道」这个信息。
+    // 这一笔把三处一起关掉：coveragePending 加 limit 参数并成为唯一定义，
+    // attention 返回里补 coverage_error，卡片按 ok===false 显示「查不出来」。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  coveragePending(id) {\n" +
+        "    /* [dsh-purge-plus] 同上：把「查不出来」和「没有缺口」分开。\n" +
+        "       返回里的 ok=false 时 total 不能当成 0 用。 */\n" +
+        "    const out = { external: 0, internal: 0, total: 0, ok: true, error: '' }\n" +
+        "    const errors = []\n" +
+        "    try { out.external = Number(this.assetNextActions(id, { limit: 30 }).total) || 0 } catch (e) { out.external = 0; errors.push('asset: ' + String((e && e.message) || e)) }\n" +
+        "    try { out.internal = Number(this.hostNextActions(id, { limit: 30 }).total) || 0 } catch (e) { out.internal = 0; errors.push('host: ' + String((e && e.message) || e)) }\n",
+      replace:
+        "  coveragePending(id, opts = {}) {\n" +
+        "    /* [dsh-purge-plus] 缺口总数的**唯一**定义：首页卡片、attention、工具三处都走这里。\n" +
+        "       ok=false 表示「查不出来」，此时 total 不能当成 0 用（UI 要显示「查不出来」）。\n" +
+        "       limit 可调：attention 只要 1 条就能拿到 total，卡片要 30 条明细。 */\n" +
+        "    const limit = Math.min(Math.max(Number(opts && opts.limit) || 30, 1), 200)\n" +
+        "    const out = { external: 0, internal: 0, total: 0, ok: true, error: '' }\n" +
+        "    const errors = []\n" +
+        "    try { out.external = Number(this.assetNextActions(id, { limit }).total) || 0 } catch (e) { out.external = 0; errors.push('asset: ' + String((e && e.message) || e)) }\n" +
+        "    try { out.internal = Number(this.hostNextActions(id, { limit }).total) || 0 } catch (e) { out.internal = 0; errors.push('host: ' + String((e && e.message) || e)) }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      let pending = 0\n" +
+        "      const errors = []\n" +
+        "      for (const fn of present) {\n" +
+        "        try { pending += Number(this[fn](id, { limit: 1 }).total) || 0 } catch (e) { errors.push(fn + ': ' + String((e && e.message) || e)) }\n" +
+        "      }\n" +
+        "      return { available: present.length === fns.length && errors.length === 0, engine: true, pending, error: errors.join('; ') }\n",
+      replace:
+        "      /* 只有一个定义：走 coveragePending（首页卡片读的也是它）。 */\n" +
+        "      const cp = this.coveragePending(id, { limit: 1 })\n" +
+        "      return { available: cp.ok === true, engine: true, pending: cp.total, error: cp.error }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      pending_coverage: coverage.pending,\n" +
+        "      coverage_available: coverage.available,\n" +
+        "      note,\n",
+      replace:
+        "      pending_coverage: coverage.pending,\n" +
+        "      coverage_available: coverage.available,\n" +
+        "      /* 查不出来时的原因：让只看数字的调用方也有办法判断「0 是真的 0 还是不知道」 */\n" +
+        "      coverage_error: coverage.available ? '' : String(coverage.error || ''),\n" +
+        "      note,\n",
+    },
+    // ══ AL. 把「只改过 dist」的修复收回仓库（构建可复现）══════════════════
+    // R11–R14 有一批改动是直接改 dist/build/package 再打包的：装出来的包有，
+    // 仓库里没有。重跑一次构建就会静默丢功能（templateOffset / cve 检索 / 补列 /
+    // 降级保护 / 原子写 …）。这一段把它们全部收回 edits，构建与已发布包可逐字节对比。
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "      if (e && e.code === \"EEXIST\") continue;\n" +
+        "      errors.push([fp, String(e)]);\n" +
+        "      continue;\n",
+      replace:
+        "      if (e && e.code === \"EEXIST\") {\n" +
+        "        /* [dsh-purge-plus] 0 字节 bak = 崩在「占位」与「写入」之间留下的。\n" +
+        "           留着它：backupAll 永远 EEXIST 跳过、revertAll 永远读不出内容 ——\n" +
+        "           备份形同不存在，而且全程不报错。当成没有备份重写一份。 */\n" +
+        "        let size = -1;\n" +
+        "        try { size = fs.statSync(bak).size; } catch { size = -1; }\n" +
+        "        if (size !== 0) continue;\n" +
+        "      } else {\n" +
+        "        errors.push([fp, String(e)]);\n" +
+        "        continue;\n" +
+        "      }\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "    try { fs.closeSync(placeholderFd); } catch { /* ignore */ }\n",
+      replace:
+        "    if (placeholderFd !== undefined) { try { fs.closeSync(placeholderFd); } catch { /* ignore */ } }\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "\n" +
+        "export async function revertAll(aiBase, options = {}) {\n",
+      replace:
+        "\n" +
+        "/** [dsh-purge-plus] 当前文件是否还带着本插件写的痕迹（marker 或任意一处 replace 文本）。\n" +
+        " *\n" +
+        " * 用途：区分「我们打过的文件」与「宿主升级后的原始文件」——两者都可能没有补丁锚点，\n" +
+        " * 但只有前者可以安全还原备份。判定不出来时返回 true（保守：宁可不动）。\n" +
+        " */\n" +
+        "function currentLooksPatched(fp, buf, aiBase) {\n" +
+        "  let text\n" +
+        "  try { text = asLf(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)) } catch { return true }\n" +
+        "  if (text.includes(DSH_PURGE_MARKER_NEEDLE)) return true\n" +
+        "  let files\n" +
+        "  try { files = targetFiles(aiBase, findDshHome()) } catch { return true }\n" +
+        "  const wanted = path.normalize(fp)\n" +
+        "  const keys = []\n" +
+        "  for (const [key, value] of Object.entries(files)) {\n" +
+        "    for (const cand of Array.isArray(value) ? value : [value]) {\n" +
+        "      if (typeof cand === 'string' && cand && path.normalize(cand) === wanted) keys.push(key)\n" +
+        "    }\n" +
+        "  }\n" +
+        "  if (keys.length === 0) return true\n" +
+        "  for (const p of ALL_PATCHES) {\n" +
+        "    if (!fileKeysOf(p).some((key) => keys.includes(key))) continue\n" +
+        "    for (const { replace } of patchReplacements(p)) {\n" +
+        "      if (typeof replace === 'string' && replace && text.includes(replace)) return true\n" +
+        "    }\n" +
+        "  }\n" +
+        "  return false\n" +
+        "}\n" +
+        "\n" +
+        "export async function revertAll(aiBase, options = {}) {\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "  const errors = [];\n" +
+        "  restoreMissingOriginalsFromBak(aiBase, {errors});\n",
+      replace:
+        "  const errors = [];\n" +
+        "  /* [dsh-purge-plus] 先刷新过期备份：宿主升级后老 bak 记的是上一版官方文件，\n" +
+        "     直接还原等于把新版写回旧版。启动路径一直有这一步，用户触发的三个入口没有。 */\n" +
+        "  try { refreshStaleBaksForUpgrade(aiBase); } catch { /* 刷新失败不挡回滚，逐文件错误照报 */ }\n" +
+        "  restoreMissingOriginalsFromBak(aiBase, {errors});\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "  const preservedUser = [];\n" +
+        "  const preserveClientBundles = options.preserveClientBundles === true;\n",
+      replace:
+        "  const preservedUser = [];\n" +
+        "  /* [dsh-purge-plus] 被判定成「官方新版，还原会降级」而只丢 bak 的文件 */\n" +
+        "  const downgradeBlocked = [];\n" +
+        "  const preserveClientBundles = options.preserveClientBundles === true;\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "        }\n" +
+        "        await restoreBackupFile(fp, bak);\n",
+      replace:
+        "        }\n" +
+        "        /* [dsh-purge-plus] 当前文件看起来是**原始官方**（没有我们的 marker，\n" +
+        "           也不含任何一处本补丁的替换文本）而 bak 又和它不同 → 宿主升级过了。\n" +
+        "           这时候还原就是把新版写回旧版（新旧混码直接崩），只丢掉 bak、不动文件。 */\n" +
+        "        if (fs.existsSync(fp) && !currentLooksPatched(fp, fs.readFileSync(fp), aiBase)) {\n" +
+        "          await fsp.unlink(bak);\n" +
+        "          downgradeBlocked.push(fp);\n" +
+        "          continue;\n" +
+        "        }\n" +
+        "        await restoreBackupFile(fp, bak);\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "  return { reverted, skipped, preservedUser, dropped, errors };\n",
+      replace:
+        "  return { reverted, skipped, preservedUser, dropped, downgradeBlocked, errors };\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "// A deletion leaves no marker. Replay it on the original backup to verify older installs too.\n" +
+        "function deletionStatus(text, patch, fp) {\n",
+      replace:
+        "// A deletion leaves no marker. Replay it on the original backup to verify older installs too.\n" +
+        "/** [dsh-purge-plus] 备份里是否还有这个补丁的锚点。\n" +
+        " *\n" +
+        " *  有 → 说明这份代码本来是应该被改的，现在没了 = 被升级覆盖（drifted）。\n" +
+        " *  没有 → 这个宿主版本本来就没有这段代码，跳过是对的。\n" +
+        " * 没有备份（从未打过）一律按「没有」处理，避免把新装宿主报成漂移。 */\n" +
+        "function backupHadAnchor(fp, patch) {\n" +
+        "  const bak = fp + BAK_SUFFIX\n" +
+        "  try {\n" +
+        "    if (!fs.lstatSync(bak).isFile()) return false\n" +
+        "    const original = fs.readFileSync(bak, 'utf8')\n" +
+        "    if (!original.length) return false\n" +
+        "    return patchHasRemainingWork(original, patch, fp)\n" +
+        "  } catch { return false }\n" +
+        "}\n" +
+        "\n" +
+        "function deletionStatus(text, patch, fp) {\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "    let notFound = 0;\n" +
+        "    let lastError = null;\n",
+      replace:
+        "    let notFound = 0;\n" +
+        "    let drifted = 0;\n" +
+        "    let lastError = null;\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "          notFound += 1;\n" +
+        "        }\n",
+      replace:
+        "          notFound += 1;\n" +
+        "        } else if (backupHadAnchor(fp, p)) {\n" +
+        "          /* [dsh-purge-plus] 备份里有锚点、现在没了 = 我们打过的代码被升级覆盖。\n" +
+        "             这是 drifted，不是 skipped —— skipped 是软成功，会把漂移藏起来。 */\n" +
+        "          drifted += 1;\n" +
+        "        }\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "      applied, already, missing, notFound, lastError, keyCount: keys.length,\n",
+      replace:
+        "      applied, already, missing, notFound, drifted, lastError, keyCount: keys.length,\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "  const handle = await nodeFs.promises.open(fp, \"w\");\n",
+      replace:
+        "  /* [dsh-purge-plus] 原子写：直接 open(fp,\"w\") 会先把文件截成 0 字节，\n" +
+        "     崩在 writeFile 之前/之中就把用户提示词清空了（磁盘满、进程被杀都能触发）。\n" +
+        "     先写同目录临时文件再 rename —— 与这个文件里其它写路径一致。 */\n" +
+        "  const tmpPath = fp + '.tmp-' + process.pid + '-' + Date.now();\n" +
+        "  const handle = await nodeFs.promises.open(tmpPath, \"w\");\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "  } finally {\n" +
+        "    await handle.close();\n",
+      replace:
+        "  } catch (error) {\n" +
+        "    try { await handle.close(); } catch { /* 已关 */ }\n" +
+        "    try { await nodeFs.promises.unlink(tmpPath); } catch { /* 没建出来 */ }\n" +
+        "    throw error;\n",
+    },
+    {
+      file: "lib/core.js",
+      required: true,
+      find:
+        "  }\n" +
+        "  rememberCommittedOverride(home, incoming);\n",
+      replace:
+        "  }\n" +
+        "  await handle.close();\n" +
+        "  await nodeFs.promises.rename(tmpPath, fp);\n" +
+        "  rememberCommittedOverride(home, incoming);\n",
+    },
+    {
+      file: "lib/core/verify.mjs",
+      required: true,
+      find:
+        "export function rollupPatchStatus({ applied, already, missing, notFound, lastError, keyCount, layoutSoft, strictFiles, requireAllTargets }) {\n",
+      replace:
+        "export function rollupPatchStatus({ applied, already, missing, notFound, drifted = 0, lastError, keyCount, layoutSoft, strictFiles, requireAllTargets }) {\n",
+    },
+    {
+      file: "lib/core/verify.mjs",
+      required: true,
+      find:
+        "  if (requireAllTargets && missing > 0 && missing < keyCount) return \"partial\";\n" +
+        "  if (applied > 0) return \"applied\";\n",
+      replace:
+        "  if (requireAllTargets && missing > 0 && missing < keyCount) return \"partial\";\n" +
+        "  /* [dsh-purge-plus] 多目标补丁：一个目标打上、另一个漂移，整条只能是 partial。\n" +
+        "     先于 applied 判，否则「一个文件命中 = 整条 applied」会把漂移吞掉（CM-03）。 */\n" +
+        "  if (applied > 0 && drifted > 0) return \"partial\";\n" +
+        "  if (applied > 0) return \"applied\";\n",
+    },
+    {
+      file: "lib/core/verify.mjs",
+      required: true,
+      find:
+        "  if (lastError) return lastError;\n" +
+        "  // 文件在，但这份原文不在：列表里本来就是跳过，不能再把整次应用判失败。\n",
+      replace:
+        "  if (lastError) return lastError;\n" +
+        "  /* [dsh-purge-plus] 备份里有过锚点、现在没了 = 漂移，不能报成 skipped（软成功）。 */\n" +
+        "  if (drifted > 0) return \"drifted\";\n" +
+        "  // 文件在，但这份原文不在：列表里本来就是跳过，不能再把整次应用判失败。\n",
+    },
+    {
+      file: "lib/reapply.js",
+      required: true,
+      find:
+        "  return !Object.values(status).some((row) => row === \"pending\" || row === \"unmatched\");\n",
+      replace:
+        "  /* [dsh-purge-plus] drifted 也算「没清洗干净」：它的语义就是「补丁痕迹还在、锚点却烂了」。\n" +
+        "     漏掉它会让第一次漂移被永久固化 —— 盖上 applied 戳之后每次启动都不再 reapply。 */\n" +
+        "  return !Object.values(status).some((row) => row === \"pending\" || row === \"unmatched\" || row === \"drifted\");\n",
+    },
+    {
+      file: "lib/redteam/cve-db.js",
+      required: true,
+      find:
+        "    where.push(\"cves LIKE ? ESCAPE '\\\\'\"); args.push('%' + cve + '%')\n",
+      replace:
+        "    /* [dsh-purge-plus] 必须走 likePattern：SQL 带 ESCAPE，裸拼 %cve% 时\n" +
+        "       值里的 % / _ 会被当通配符，反斜杠会让整条语句报错（一个坏值炸掉整批导入）。 */\n" +
+        "    where.push(\"cves LIKE ? ESCAPE '\\\\'\"); args.push(likePattern(cve))\n",
+    },
+    {
+      file: "lib/redteam/platform-config.js",
+      required: true,
+      find:
+        "    return {\n",
+      replace:
+        "    /* [dsh-purge-plus] 先铺开原始 JSON，再用规范化后的已知字段覆盖。\n" +
+        "       否则 templatesRefreshedAt 这类「表外但重要」的键在读这一步就丢了。 */\n" +
+        "    return Object.assign({}, raw, {\n",
+    },
+    {
+      file: "lib/redteam/platform-config.js",
+      required: true,
+      find:
+        "      exists: true,\n" +
+        "    }\n" +
+        "  } catch (error) {\n",
+      replace:
+        "      exists: true,\n" +
+        "    })\n" +
+        "  } catch (error) {\n",
+    },
+    {
+      file: "lib/redteam/platform-config.js",
+      required: true,
+      find:
+        "  const next = {\n",
+      replace:
+        "  /* [dsh-purge-plus] 先铺开旧配置，再覆盖已知字段：\n" +
+        "     表外的键（templatesRefreshedAt / templatesCount / templatesCommit /\n" +
+        "     templatesLastError …）必须原样留下，否则面板保存一次就把模板保鲜状态冲掉。 */\n" +
+        "  const next = Object.assign({}, prev, {\n",
+    },
+    {
+      file: "lib/redteam/platform-config.js",
+      required: true,
+      find:
+        "    updated_at: new Date().toISOString(),\n" +
+        "  }\n",
+      replace:
+        "    updated_at: new Date().toISOString(),\n" +
+        "  })\n" +
+        "  /* 表外键也要从 patch 里带过来（templatesRefreshedAt 这类由 bootstrap-runtime 写入、\n" +
+        "     面板并不认识，但必须在保存后仍然存在）。 */\n" +
+        "  for (const [k, v] of Object.entries(patch && typeof patch === 'object' ? patch : {})) {\n" +
+        "    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue\n" +
+        "    if (!(k in next)) next[k] = v\n" +
+        "  }\n",
+    },
+    {
+      file: "lib/redteam/schema.js",
+      required: true,
+      find:
+        "  summary TEXT,\n" +
+        "  created_at TEXT,\n",
+      replace:
+        "  summary TEXT,\n" +
+        "  /* [dsh-purge-plus] 子智能体回报里点名的任务 id（team_task_id / task_id）。\n" +
+        "     team-board.js 用它做精确匹配；没有这一列就只能启发式猜。 */\n" +
+        "  team_task_id TEXT,\n" +
+        "  created_at TEXT,\n",
+    },
+    {
+      file: "lib/redteam/schema.js",
+      required: true,
+      find:
+        "CREATE INDEX IF NOT EXISTS ix_cleanup_asset ON cleanup_item(asset_id);\n",
+      replace:
+        "/* [dsh-purge-plus] 这个索引不能写在 DDL 常量里：老库的 cleanup_item 可能没有\n" +
+        "   asset_id 列，IF NOT EXISTS 只保护索引不保护列，建索引会整段抛错。\n" +
+        "   挪到 migrate 的补列之后建（见下方 ensure 段）。 */\n",
+    },
+    {
+      file: "lib/redteam/schema.js",
+      required: true,
+      find:
+        "  ensure('agent_report', 'acknowledged_at', 'TEXT')\n" +
+        "  /* 覆盖度三表：新库由 DDL 建好，老库（先装 community/safe 再换本包）这里补建。\n",
+      replace:
+        "  ensure('agent_report', 'acknowledged_at', 'TEXT')\n" +
+        "  ensure('agent_report', 'team_task_id', 'TEXT')\n" +
+        "  /* 覆盖度三表：新库由 DDL 建好，老库（先装 community/safe 再换本包）这里补建。\n",
+    },
+    {
+      file: "lib/redteam/schema.js",
+      required: true,
+      find:
+        "    ensure('cleanup_item', 'location', 'TEXT')\n" +
+        "    db.exec(`CREATE TABLE IF NOT EXISTS data_proof (\n",
+      replace:
+        "    ensure('cleanup_item', 'location', 'TEXT')\n" +
+        "    /* [dsh-purge-plus] safe 的 cleanup_item 只有 9 列。除了 location，还缺这 5 列；\n" +
+        "       少一列，对应的写入/索引就会在「老库」上整条失败。ensure 自带「有这列就跳过」。 */\n" +
+        "    for (const [col, type] of [\n" +
+        "      ['asset_id', 'INTEGER'], ['title', 'TEXT'], ['evidence_ref', 'TEXT'],\n" +
+        "      ['priority', 'TEXT'], ['updated_by', 'TEXT'],\n" +
+        "    ]) ensure('cleanup_item', col, type)\n" +
+        "    /* 列补齐之后才建索引 —— 顺序反了就是 PA-01。 */\n" +
+        "    db.exec('CREATE INDEX IF NOT EXISTS ix_cleanup_asset ON cleanup_item(asset_id)')\n" +
+        "    db.exec(`CREATE TABLE IF NOT EXISTS data_proof (\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      const q = req.q || req.query || req.cve || req.component || ''\n" +
+        "      const templates = q\n",
+      replace:
+        "      const q = req.q || req.query || req.cve || req.component || ''\n" +
+        "      /* [dsh-purge-plus] templateOffset 必须传下去：面板翻页参数一直在发，\n" +
+        "         丢掉的后果是「下一页」永远是同一页，而返回 ok:true 看不出来。 */\n" +
+        "      const tplOffset = Math.max(Number(req.templateOffset) || 0, 0)\n" +
+        "      const templates = q\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "        ? store.searchTemplates(q, Math.min(Number(req.templateLimit) || 20, 100))\n",
+      replace:
+        "        ? store.searchTemplates(q, Math.min(Number(req.templateLimit) || 20, 100), tplOffset)\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    if (op === 'templateSearch') return Object.assign({ ok: true }, store.searchTemplates(req.q, Math.min(Number(req.limit) || 40, 200)))\n",
+      replace:
+        "    if (op === 'templateSearch') {\n" +
+        "      /* [dsh-purge-plus] cve 与 q 同义（模板库的 haystack 已含 cves 列）：\n" +
+        "         只认 q 的话，调用方传 {cve:'CVE-…'} 会拿到全库 14441 条，看着像「搜到了」。 */\n" +
+        "      const tq = req.q || req.cve || ''\n" +
+        "      const toff = Math.max(Number(req.offset) || 0, 0)\n" +
+        "      return Object.assign({ ok: true }, store.searchTemplates(tq, Math.min(Number(req.limit) || 40, 200), toff))\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      return Object.assign({ ok: true }, store.proxyPoolImport(typeof req.yaml === 'string' ? req.yaml : '', { replace: req.replace === true }))\n",
+      replace:
+        "      const imported = store.proxyPoolImport(typeof req.yaml === 'string' ? req.yaml : '', { replace: req.replace === true })\n" +
+        "      /* [dsh-purge-plus] ok 要反映「有没有真的导进来」：空配置或全部重复时\n" +
+        "         原先也回 ok:true，面板会显示「已加入 0 个节点」像是成功了。\n" +
+        "         warnings 里已经逐条说明原因。 */\n" +
+        "      return Object.assign({}, imported, { ok: imported.importedCount > 0 })\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    if (op === 'asset') return { ok: true, asset: store.getAsset(id, req.id) }\n",
+      replace:
+        "    if (op === 'asset') {\n" +
+        "      /* [dsh-purge-plus] 查不到必须 ok:false：`{ok:true, asset:undefined}` 序列化后\n" +
+        "         就是 `{ok:true}`，和「查到了但没字段」同形，调用方分不出来。 */\n" +
+        "      const one = store.getAsset(id, req.id)\n" +
+        "      return one ? { ok: true, asset: one } : { ok: false, error: 'asset not found: ' + String(req.id) }\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      }\n" +
+        "      if (obj.status === undefined) return null\n",
+      replace:
+        "      }\n" +
+        "      /* [dsh-purge-plus] 回报可以点名自己在做哪张任务卡（safe 2.0.2 同款两种写法） */\n" +
+        "      const taskRef = field('team_task_id') ?? field('task_id')\n" +
+        "      if (taskRef !== undefined) obj.team_task_id = taskRef\n" +
+        "      if (obj.status === undefined) return null\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      needs,\n" +
+        "    }\n",
+      replace:
+        "      needs,\n" +
+        "      /* 空串按「没点名」处理：写进库的是 NULL，不是 ''，否则精确匹配会拿空串去比 */\n" +
+        "      team_task_id: typeof (obj.team_task_id ?? obj.task_id) === 'string'\n" +
+        "        ? ((obj.team_task_id ?? obj.task_id).trim() || undefined) : undefined,\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    db.prepare('INSERT INTO agent_report(session_id, parent_session, role, label, status, blocked_reason, needs, summary, created_at) ' +\n" +
+        "      'VALUES(?,?,?,?,?,?,?,?,?)').run(\n",
+      replace:
+        "    db.prepare('INSERT INTO agent_report(session_id, parent_session, role, label, status, blocked_reason, needs, summary, team_task_id, created_at) ' +\n" +
+        "      'VALUES(?,?,?,?,?,?,?,?,?,?)').run(\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      f.summary === undefined || f.summary === null ? null : String(f.summary).slice(0, 2000),\n" +
+        "      nowIso(),\n",
+      replace:
+        "      f.summary === undefined || f.summary === null ? null : String(f.summary).slice(0, 2000),\n" +
+        "      typeof f.team_task_id === 'string' ? (f.team_task_id.trim() || null) : null,\n" +
+        "      nowIso(),\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200)\n" +
+        "    const rows = db.prepare(\n",
+      replace:
+        "    const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200)\n" +
+        "    /* [dsh-purge-plus] byTask：按「会话 + 任务」分组取最新一条。\n" +
+        "       一个子智能体可能先后报两张卡，只按会话分组会把前一张卡的回报吃掉。 */\n" +
+        "    const group = opts.byTask === true ? \"session_id, COALESCE(team_task_id, '')\" : 'session_id'\n" +
+        "    const rows = db.prepare(\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      'JOIN (SELECT session_id, MAX(id) AS max_id FROM agent_report WHERE parent_session = ? GROUP BY session_id) m ' +\n",
+      replace:
+        "      'JOIN (SELECT ' + group + ' AS gk, MAX(id) AS max_id FROM agent_report WHERE parent_session = ? GROUP BY ' + group + ') m ' +\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      + \" ORDER BY CASE COALESCE(a.priority,'medium') WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, a.id ASC LIMIT 400\").all(...args)\n" +
+        "    const actions = []\n" +
+        "    for (const a of rows) {\n" +
+        "      if (scopeOfIp(a.ip) !== 'internal') continue\n",
+      replace:
+        "      + \" ORDER BY CASE COALESCE(a.priority,'medium') WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, a.id ASC LIMIT 400\").all(...args)\n" +
+        "    const actions = []\n" +
+        "    /* [dsh-purge-plus] abandoned（被封 >3 次）与 no_surface（已判定没面）不该再进队列：\n" +
+        "       提示词里明确写「直接跳过」，队列却把它们排在前面，等于让模型反复去啃已放弃的主机。 */\n" +
+        "    const SKIP_STATUS = new Set(['abandoned', 'no_surface'])\n" +
+        "    for (const a of rows) {\n" +
+        "      if (scopeOfIp(a.ip) !== 'internal') continue\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      if (scopeOfIp(a.ip) !== 'internal') continue\n" +
+        "      let cov\n",
+      replace:
+        "      if (scopeOfIp(a.ip) !== 'internal') continue\n" +
+        "      if (SKIP_STATUS.has(String(a.test_status || ''))) continue\n" +
+        "      let cov\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const title = String(item.title === undefined || item.title === null ? '' : item.title).trim()\n" +
+        "    if (title === '') throw new Error('title 不能为空：清理项必须一句话说清要删什么')\n",
+      replace:
+        "    /* [dsh-purge-plus] 缺 title 不再抛错，按 kind/target/location 生成一句。\n" +
+        "       safe 2.0.2 只要求 kind，从 safe 迁移过来的调用方一律不带 title；\n" +
+        "       硬抛等于让它们全部失败。生成的是**可读**标题，不是空占位。 */\n" +
+        "    let title = String(item.title === undefined || item.title === null ? '' : item.title).trim()\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const location = String(item.location === undefined || item.location === null ? '' : item.location).trim()\n" +
+        "    /* 同 kind + 同 target + **同 location** + 还没收口的才算重复。\n",
+      replace:
+        "    const location = String(item.location === undefined || item.location === null ? '' : item.location).trim()\n" +
+        "    if (title === '') {\n" +
+        "      const where2 = [target, location].filter((v) => v !== '').join(' ')\n" +
+        "      title = `${kind}${where2 ? ' @ ' + where2 : ''}（自动生成）`\n" +
+        "    }\n" +
+        "    /* 同 kind + 同 target + **同 location** + 还没收口的才算重复。\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    } catch (e) { rows = []; queryError = String((e && e.message) || e) }\n" +
+        "    const byStatus = { open: 0, done: 0, wontfix: 0 }\n",
+      replace:
+        "    } catch (e) { rows = []; queryError = String((e && e.message) || e) }\n" +
+        "    /* [dsh-purge-plus] total 用 COUNT(*)：rows 带了 LIMIT，拿它的长度当总数\n" +
+        "       会让「超过一页」的清单永远翻不到第二页（3 条 limit=2 时报 total 2）。 */\n" +
+        "    let total = rows.length\n" +
+        "    if (queryError === null) {\n" +
+        "      try {\n" +
+        "        total = Number(db.prepare('SELECT COUNT(*) AS n FROM cleanup_item'\n" +
+        "          + (where.length ? ' WHERE ' + where.join(' AND ') : '')).get(...args).n) || 0\n" +
+        "      } catch { total = rows.length }\n" +
+        "    }\n" +
+        "    /* [dsh-purge-plus] 统计口径是**筛选后全量**，不是当前这一页：\n" +
+        "       rows 带 LIMIT，按它算 by_status 会让第 2 页显示 0；\n" +
+        "       而 cleared 更不能按筛选算 —— 只看 status=done 时 open 恒为 0，\n" +
+        "       于是「还有 20 条没删」也会被报成「已清干净」。 */\n" +
+        "    const byStatus = { open: 0, done: 0, wontfix: 0 }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    for (const r of rows) {\n" +
+        "      if (byStatus[r.status] !== undefined) byStatus[r.status] += 1\n" +
+        "      byKind[r.kind] = (byKind[r.kind] || 0) + 1\n",
+      replace:
+        "    let openTotal = null\n" +
+        "    if (queryError === null) {\n" +
+        "      try {\n" +
+        "        /* 统计用**整表**、不带筛选：它和 cleared 是同一句结论的两半，\n" +
+        "           一个带筛选一个不带，会出现「by_status.open=0 但 cleared=false」的自相矛盾。 */\n" +
+        "        const agg = db.prepare('SELECT status, kind, COUNT(*) AS n FROM cleanup_item GROUP BY status, kind').all()\n" +
+        "        for (const r of agg) {\n" +
+        "          if (byStatus[r.status] !== undefined) byStatus[r.status] += Number(r.n) || 0\n" +
+        "          byKind[r.kind] = (byKind[r.kind] || 0) + (Number(r.n) || 0)\n" +
+        "        }\n" +
+        "      } catch { /* 聚合失败就留空，不假装 0 */ }\n" +
+        "      try { openTotal = Number(db.prepare(\"SELECT COUNT(*) AS n FROM cleanup_item WHERE status = 'open'\").get().n) || 0 } catch { openTotal = null }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      total: rows.length,\n",
+      replace:
+        "      total,\n" +
+        "      returned: rows.length,\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      cleared: queryError === null ? byStatus.open === 0 : null,\n",
+      replace:
+        "      cleared: queryError === null && openTotal !== null ? openTotal === 0 : null,\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const before = Object.assign({}, state.policy)\n" +
+        "    state.policy = {\n",
+      replace:
+        "    const before = Object.assign({}, state.policy)\n" +
+        "    /* [dsh-purge-plus] 只改调用方**真的给过**的字段。\n" +
+        "       无条件按 `=== true` 取值，会让「只调超时」把连接开关和引擎路径一起清空 ——\n" +
+        "       面板上表现为「保存超时后自动连接自己关了」，而且返回 ok:true。 */\n" +
+        "    const has = (k) => Object.prototype.hasOwnProperty.call(settings, k)\n" +
+        "    state.policy = {\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      enabled: settings.enabled === true,\n" +
+        "      autoConnect: settings.autoConnect === true,\n",
+      replace:
+        "      enabled: has('enabled') ? settings.enabled === true : state.policy.enabled,\n" +
+        "      autoConnect: has('autoConnect') ? settings.autoConnect === true : state.policy.autoConnect,\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      enginePath: String(settings.enginePath || '').trim(),\n",
+      replace:
+        "      enginePath: has('enginePath') ? String(settings.enginePath || '').trim() : state.policy.enginePath,\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    if (String(options.layout || '') === 'simple') {\n",
+      replace:
+        "    /* [dsh-purge-plus] 默认 simple：与 safe 2.0.2 一致。legacy 仍可用 layout:'legacy' 显式要。 */\n" +
+        "    if (String(options.layout || 'simple') !== 'legacy') {\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "          && Number(cached.v || 0) === 2 /* [dsh-purge-plus] 过滤规则变了要重建 */\n",
+      replace:
+        "          && Number(cached.v || 0) === 3 /* [dsh-purge-plus] 过滤规则变了要重建 */\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "        if (!/\\.ya?ml$/i.test(e.name)) continue\n" +
+        "        let head = ''\n",
+      replace:
+        "        if (!/\\.ya?ml$/i.test(e.name)) continue\n" +
+        "        /* 整份读：只看前 2000 字节会丢掉 info 块后半段的 metadata，\n" +
+        "           也会漏掉只在 examples/description 里出现的 CVE 编号（safe 2.0.2 同口径）。 */\n" +
+        "        let full = ''\n" +
+        "        try { full = readFileSync(join(base, next), 'utf8') } catch { continue }\n" +
+        "        /* [dsh-purge-plus] 没有顶层 id 的不是 nuclei 模板（.github/workflows 之类） */\n" +
+        "        if (!/^\\s*id:\\s*\\S+/m.test(full)) continue\n" +
+        "        /* 优先在 info: 块里找字段；找不到再退回整份（有些模板把 name 写在别处）。 */\n" +
+        "        const infoStart = /^info:\\s*\\n/m.exec(full)\n" +
+        "        let head = ''\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "        try { head = readFileSync(join(base, next), 'utf8').slice(0, 2000) } catch { continue }\n" +
+        "        /* [dsh-purge-plus] 没有顶层 id 的不是 nuclei 模板（.github/workflows 之类） */\n" +
+        "        if (!/^\\s*id:\\s*\\S+/m.test(head)) continue\n" +
+        "        const pick = (re) => { const m = re.exec(head); return m === null ? '' : String(m[1]).trim().replace(/^[\"']|[\"']$/g, '') }\n",
+      replace:
+        "        if (infoStart) {\n" +
+        "          const rest = full.slice(infoStart.index + infoStart[0].length)\n" +
+        "          const nextTop = rest.search(/^\\S/m)\n" +
+        "          head = nextTop >= 0 ? rest.slice(0, nextTop) : rest\n" +
+        "        } else {\n" +
+        "          head = full\n" +
+        "        }\n" +
+        "        const pick = (re) => {\n" +
+        "          const m = re.exec(head) || re.exec(full)\n" +
+        "          return m === null ? '' : String(m[1]).trim().replace(/^[\"']|[\"']$/g, '')\n" +
+        "        }\n" +
+        "        /* CVE 编号：文件名 + 整份正文都扫，大写归一。这是「按 CVE 找模板」的唯一依据。 */\n" +
+        "        const cves = new Set()\n" +
+        "        for (const cve of (e.name + '\\n' + full).match(/CVE-\\d{4}-\\d{4,7}/gi) || []) cves.add(cve.toUpperCase())\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "          pick(/^\\s*tags:\\s*(.+)$/m),\n" +
+        "        ])\n",
+      replace:
+        "          pick(/^\\s*tags:\\s*(.+)$/m),\n" +
+        "          [...cves].join(' '),\n" +
+        "        ])\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      writeFileSync(cachePath, JSON.stringify({ v: 2, built_at: Date.now(), dir, items }), 'utf8')\n",
+      replace:
+        "      writeFileSync(cachePath, JSON.stringify({ v: 3, built_at: Date.now(), dir, items }), 'utf8')\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const cve = items.filter((x) => /cve-\\d{4}-\\d+/i.test(x[0])).length\n",
+      replace:
+        "    /* [dsh-purge-plus] cve 的口径与 safe 对齐：有 CVE 列的模板数（不是「文件名里有 CVE」）。\n" +
+        "       另外给 cve_ids = 去重后的编号个数，面板用它显示「覆盖多少个 CVE」。 */\n" +
+        "    const cve = items.filter((x) => String(x[4] || '') !== '').length\n" +
+        "    const cveIdSet = new Set()\n" +
+        "    for (const item of items) for (const id of String(item[4] || '').split(/\\s+/)) if (id) cveIdSet.add(id)\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    return { dir: dir || null, total: items.length, cve, byCategory }\n",
+      replace:
+        "    return { dir: dir || null, total: items.length, cve, cve_ids: cveIdSet.size, byCategory }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    for (const [path, name, severity, tags] of items) {\n",
+      replace:
+        "    for (const [path, name, severity, tags, cves] of items) {\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      if (needle && !(path + ' ' + name + ' ' + tags).toLowerCase().includes(needle)) continue\n" +
+        "      out.push({ path, name, severity, tags })\n",
+      replace:
+        "      /* [dsh-purge-plus] haystack 必须含 cves 列（safe 2.0.2 同口径）：\n" +
+        "         否则「按 CVE 编号找模板」只能命中文件名里恰好带编号的那几条。 */\n" +
+        "      if (needle && !(path + ' ' + name + ' ' + tags + ' ' + String(cves || '')).toLowerCase().includes(needle)) continue\n" +
+        "      out.push({ path, name, severity, tags, cves: String(cves || '') })\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "                needs: parsed.needs,\n" +
+        "                summary: reportText.slice(-1500),\n",
+      replace:
+        "                needs: parsed.needs,\n" +
+        "                team_task_id: parsed.team_task_id,\n" +
+        "                summary: reportText.slice(-1500),\n",
+    },
+    // ══ AK. 无靶标口径 / 并发闸门回报契约 / 清理清单翻页（R15）══════════════
+    // 三条都是「返回 ok:true、数字看着正常，错在语义」的形状，
+    // 每条都配了能构造故障的回归（scripts/mutate-check.mjs 会把它改坏一次）。
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "const text = (value) => [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }]\n",
+      replace:
+        "const text = (value) => [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }]\n" +
+        "\n" +
+        "/**\n" +
+        " * 没有靶标时的统一回执。\n" +
+        " *\n" +
+        " * 口径必须与 op 层（store-core `dispatch` 的无靶标分支）一致：`ok:false` + `no_target:true`。\n" +
+        " * 工具层此前对 11 个只读工具返回 `ok:true, note:'还没有靶标'` —— 模型看到成功、看到空数组，\n" +
+        " * 会当成「这个靶标确实没有数据」继续往下走，而不是「我还没选靶标」。\n" +
+        " *\n" +
+        " * 这条分支正常不可达（`resolveEngagement` 会先抛），留着是为了解析器将来一旦改成\n" +
+        " * 「返回空串表示没靶标」，失败要响亮而不是静默。\n" +
+        " */\n" +
+        "function noTarget(extra) {\n" +
+        "  return JSON.stringify(Object.assign({\n" +
+        "    ok: false,\n" +
+        "    no_target: true,\n" +
+        "    error: '还没有靶标：先 redteam_engagement_open 新建/打开，或 redteam_session_bind 绑定已有靶标。',\n" +
+        "  }, extra || {}), null, 2)\n" +
+        "}\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      if (!bound) return JSON.stringify({ ok: true, total: 0, awaiting_person: 0, items: [], pending_coverage: 0, coverage_available: false, note: '还没有靶标' }, null, 2)\n",
+      replace:
+        "      if (!bound) return noTarget({ total: 0, awaiting_person: 0, items: [], pending_coverage: 0, coverage_available: false })\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      count: 4,
+      find:
+        "      if (!t.id) return JSON.stringify({ ok: true, note: '还没有靶标' }, null, 2)\n",
+      replace:
+        "      if (!t.id) return noTarget()\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      if (!t.id) return JSON.stringify({ ok: true, total: 0, findings: [], note: '还没有靶标' }, null, 2)\n",
+      replace:
+        "      if (!t.id) return noTarget({ total: 0, findings: [] })\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      if (!t.id) return JSON.stringify({ ok: true, external: { total: 0, actions: [] }, internal: { total: 0, actions: [] }, note: '还没有靶标' }, null, 2)\n",
+      replace:
+        "      if (!t.id) return noTarget({ external: { total: 0, actions: [] }, internal: { total: 0, actions: [] } })\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      count: 2,
+      find:
+        "      if (!t.id) return JSON.stringify({ ok: true, total: 0, items: [], note: '还没有靶标' }, null, 2)\n",
+      replace:
+        "      if (!t.id) return noTarget({ total: 0, items: [] })\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      count: 2,
+      find:
+        "      if (!t.id) return JSON.stringify({ ok: true, items: [], total: 0, note: '还没有靶标' }, null, 2)\n",
+      replace:
+        "      if (!t.id) return noTarget({ items: [], total: 0 })\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      count: 5,
+      find:
+        "      if (!t.id) return JSON.stringify({ ok: false, error: '还没有靶标' }, null, 2)\n",
+      replace:
+        "      if (!t.id) return noTarget()\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "    description: '【主会话派活前后用】执行智能体的并发闸门：同一靶标**最多同时 3 个**在跑（可用 REDTEAM_MAX_AGENTS 配置）。action=status 看还剩几个名额与谁在跑；action=acquire 占一个名额（满了会直接拒绝，**不要重试硬塞**）；action=release 释放（子智能体结束时服务端也会自动释放）。',\n" +
+        "    parameters: {\n" +
+        "      action: { type: 'string', required: true, enum: ['status', 'acquire', 'release'], description: 'status 查看 / acquire 占用 / release 释放' },\n" +
+        "      status: { type: 'string', enum: ['progress', 'ready', 'blocked', 'waiting'], description: '【只有执行子智能体填】blocked/waiting 表示在等人给 key/VPS/范围 —— 会**让出名额**，不占并发；progress/ready 收回名额。主会话不要填。' },\n",
+      replace:
+        "    description: '【主会话派活前后 / 子智能体卡住时用】执行智能体的并发闸门：同一靶标**最多同时 3 个**在跑（可用 REDTEAM_MAX_AGENTS 配置）。action=status 看还剩几个名额与谁在跑；action=acquire 占一个名额（满了会直接拒绝，**不要重试硬塞**）；action=release 释放（子智能体结束时服务端也会自动释放）。**子智能体回报自己的状态用 report=...（不必再传 action）**：blocked/waiting 表示在等人给 key/VPS/范围，会让出名额；progress/ready 收回；failed/dropped 表示这一轮结束，同样不再占名额。',\n" +
+        "    parameters: {\n" +
+        "      /* action 不再是必填：子智能体只回报状态时不必再编一个动作名。\n" +
+        "         同时把「查看」与「回报」拆开 —— 旧写法 action=status + status=blocked 把两件事压在一个字段上，\n" +
+        "         读代码的人无法判断调用方到底想要哪一种。 */\n" +
+        "      action: { type: 'string', enum: ['status', 'report', 'acquire', 'release'], description: 'status 查看（省略时的默认）/ report 回报自己状态（等价于只传 report）/ acquire 占用 / release 释放' },\n" +
+        "      report: { type: 'string', enum: ['progress', 'ready', 'blocked', 'waiting', 'failed', 'dropped'], description: '【只有执行子智能体填】本次回报的状态：blocked/waiting 会让出名额；progress/ready 收回；failed/dropped 表示这轮结束，同样让出名额。' },\n" +
+        "      /* 旧名保留：已经写进提示词/预设的调用不该因为改名而失败。 */\n" +
+        "      status: { type: 'string', enum: ['progress', 'ready', 'blocked', 'waiting', 'failed', 'dropped'], description: '（旧名，等价 report；保留兼容。新调用请用 report）' },\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      /* [dsh-purge-plus] 子智能体自报状态：在等人时让出名额（safe 2.0.2 tools.js:949）。\n" +
+        "         主会话填 status 一律拒绝 —— 它不占名额，填了只会把数字搅乱。 */\n" +
+        "      const selfChild = sessionId !== undefined && sessionId !== owner ? sessionId : undefined\n" +
+        "      const reportStatus = typeof args.status === 'string' ? args.status : ''\n" +
+        "      if (reportStatus !== '') {\n" +
+        "        if (selfChild === undefined) {\n" +
+        "          return JSON.stringify({ ok: false, error: 'status 只由执行子智能体填写；主会话用 label/key 操作名额。' }, null, 2)\n" +
+        "        }\n" +
+        "        if (reportStatus === 'blocked' || reportStatus === 'waiting') parkAgent(owner, selfChild)\n" +
+        "        else if (reportStatus === 'progress' || reportStatus === 'ready') unparkAgent(owner, selfChild)\n" +
+        "      }\n",
+      replace:
+        "      /* [dsh-purge-plus] 子智能体自报状态：在等人时让出名额（safe 2.0.2 tools.js:949）。\n" +
+        "         主会话填 report/status 一律拒绝 —— 它不占名额，填了只会把数字搅乱。\n" +
+        "\n" +
+        "         与 safe 的差异（有意）：safe 的 action 必填且只认 status/acquire/release，\n" +
+        "         子智能体想报 failed/dropped 会被参数校验直接拒掉（枚举里没有这两个值），\n" +
+        "         于是「失败了」这件事根本传不回来。这里补齐六个值，并让 action 可省略。 */\n" +
+        "      const selfChild = sessionId !== undefined && sessionId !== owner ? sessionId : undefined\n" +
+        "      const reportStatus = typeof args.report === 'string' && args.report !== ''\n" +
+        "        ? args.report\n" +
+        "        : (typeof args.status === 'string' ? args.status : '')\n" +
+        "      const legacyReport = args.report === undefined && reportStatus !== ''\n" +
+        "      const action = typeof args.action === 'string' && args.action !== '' ? args.action : ''\n" +
+        "      if (reportStatus !== '') {\n" +
+        "        if (selfChild === undefined) {\n" +
+        "          return JSON.stringify({ ok: false, error: 'report 只由执行子智能体填写；主会话用 label/key 操作名额。' }, null, 2)\n" +
+        "        }\n" +
+        "        if (reportStatus === 'blocked' || reportStatus === 'waiting') parkAgent(owner, selfChild)\n" +
+        "        /* failed / dropped 是「这轮结束了」：不解除挂起就会永远占着一个 parked 名额 */\n" +
+        "        else unparkAgent(owner, selfChild)\n" +
+        "      }\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "      if (args.action === 'status') {\n" +
+        "        return JSON.stringify(Object.assign(base, {\n" +
+        "          hint: free === 0\n",
+      replace:
+        "      if (action === '' || action === 'status' || action === 'report') {\n" +
+        "        const viewed = Object.assign(base, {\n" +
+        "          hint: free === 0\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find:
+        "            : '还有 ' + free + ' 个名额。默认一个一个派；只有确实互不依赖的活才并行。',\n" +
+        "        }), null, 2)\n" +
+        "      }\n" +
+        "      if (args.action === 'acquire') {\n",
+      replace:
+        "            : '还有 ' + free + ' 个名额。默认一个一个派；只有确实互不依赖的活才并行。',\n" +
+        "        })\n" +
+        "        if (reportStatus !== '') {\n" +
+        "          viewed.reported = reportStatus\n" +
+        "          viewed.parked = reportStatus === 'blocked' || reportStatus === 'waiting'\n" +
+        "          if (legacyReport) viewed.deprecated = 'status 已改名 report（action 也可省略）；旧写法仍可用。'\n" +
+        "        }\n" +
+        "        return JSON.stringify(viewed, null, 2)\n" +
+        "      }\n" +
+        "      if (action === 'acquire') {\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "            status: req.status, kind: req.kind, asset_id: req.asset_id, limit: req.limit,\n",
+      replace:
+        "            status: req.status, kind: req.kind, asset_id: req.asset_id, limit: req.limit, offset: req.offset,\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  listCleanup(id, f = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    const limit = Math.min(Math.max(Number(f.limit) || 100, 1), 500)\n",
+      replace:
+        "  listCleanup(id, f = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    const limit = Math.min(Math.max(Number(f.limit) || 100, 1), 500)\n" +
+        "    /* [dsh-purge-plus] 翻页要 offset：只把 total 改成 COUNT(*) 但 SQL 不认 offset，\n" +
+        "       调用方拿到「总数 3」却永远只能看前 2 条 —— 与「总数报错」是同一个毛病的两半。 */\n" +
+        "    const offset = Math.max(Number(f.offset) || 0, 0)\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "\"CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id DESC LIMIT ?\").all(...args, limit)\n",
+      replace:
+        "\"CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id DESC LIMIT ? OFFSET ?\").all(...args, limit, offset)\n",
+    },
   ];
 }
 

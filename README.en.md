@@ -7,10 +7,10 @@
 Separate the host layer from the model layer: whether the model is willing to answer is one question; how many gates the host puts in front of it is another.
 
 [![Release](https://img.shields.io/github/v/release/EthanChewCN/dsh-purge-plus?label=release&color=6E56CF)](https://github.com/EthanChewCN/dsh-purge-plus/releases)
-[![Patches](https://img.shields.io/badge/host%20patches-95-3B82F6)]
+[![Patches](https://img.shields.io/badge/host%20patches-95-3B82F6)](#what-you-get)
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5-22D3EE)](https://github.com/deepseek-ai/deepseek-harness)
-[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)]
-[![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](#license-and-attribution)
+[![Node](https://img.shields.io/badge/Node.js-%E2%89%A522.5-339933?logo=node.js&logoColor=fff)](#prerequisites)
 
 Version: see the Release badge above (not hardcoded — every release would otherwise force a doc edit, which forces another release) · targets **DSH Desktop 0.2.2-rc.5** · [中文](README.md)
 
@@ -54,15 +54,15 @@ It does not change the model, the cloud account, or upload prompts and configura
 ```
 base    dsh-purge Community   MIT         host patches · patch engine · ops layer
 port    dsh-purge safe        Apache-2.0  a branch with a wider capability surface
-result  dsh-purge-plus        variant     95 patches · 31 read-only checks
+result  dsh-purge-plus        variant     95 patches · 50 read-only checks
 ```
 
 This repo is **not** a fork of community and **not** a fork of safe. It treats both upstreams as read-only inputs:
 
 - `vendor/community/` — the base, verbatim copy, read-only at build time;
 - `vendor/safe/` — the porting source, verbatim copy, used only for comparison;
-- `overlay/` — **every** change this repo makes: new files plus **185 anchor edits** (`required` 182 / `required:false` 3)
-  and **92 snippet injection points**, guarded by `verify [26]` (doc numbers must match recomputed code counts).
+- `overlay/` — **every** change this repo makes: new files plus **309 anchor edits** (`required` 306 / `required:false` 3)
+  and **96 snippet injection points** plus 4 brand-string fixes, guarded by `verify [26]` (doc numbers must match recomputed code counts).
 
 ---
 
@@ -70,17 +70,23 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 
 | Layer | Content |
 | :--- | :--- |
-| **Host patches** | **95** = 88 upstream + 7 own (id ≥ 201) |
+| **Host patches** | **95** = 88 upstream + 7 own (id ≥ 201, all listed below) |
 | Own #201 | `PRODUCT_ANALYTICS_DEFAULT_OFF` — product analytics off by default |
 | Own #202 | `PRODUCT_TELEMETRY_OTEL_NOOP` — product telemetry OTLP exporter becomes a no-op |
 | Own #203 | `SESSION_TELEMETRY_OTEL_DISABLED` — session telemetry defaults to `DISABLED` |
 | Own #205 | `SESSION_LOG_CLOUD_UPLOAD_UNREGISTER` — session log upload short-circuited at the registration site |
 | Own #206 | `SUBAGENT_INHERIT_PARENT_ACCESS` — subagents inherit the parent permission preset verbatim |
+| Own #207 | `BLANK_REUSE_KEEPS_RECORDED_PRESET` — reusing a blank session keeps the preset recorded in its log (cold path) |
+| Own #208 | `LIVE_BLANK_REUSE_KEEPS_RECORDED_PRESET` — same for a still-live blank session (live path) |
 | Own module | `lib/subagent-fence.js` — a leaf subagent may not delegate further |
-| Patch engine | 30 schema fields: `drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
+| Patch engine | **30 descriptor fields**: `drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
+| Backend ops | **94** (union of both upstreams 84 + 10 own); the UI references 68, all resolvable |
 | Ops layer | `audit.jsonl`, cross-process maintenance lock, rollback transaction, layered self-check, runtime probe, drift detection |
 | In-app upgrade | "Check for updates" works: anonymous GitHub releases, byte-exact `SHA256SUMS.txt` verification |
-| Drill desk | Full-page settings in the sidebar + red-team fact store (SQLite) |
+| Drill desk | Full-page settings in the sidebar + red-team fact store (SQLite), **14 tabs / 6 top-level groups** |
+| Skill library | **40** (23 from community + 17 unique to safe), every referenced tool is registered |
+
+#207 and #208 are two paths of one fix: `#207` covers `observeSession → resume` before the session is live, `#208` covers the `claim()` branch of a live session. With only one of them, the most common case — "just picked a mode, session still alive" — is still silently written back to the deployment default, so both must exist.
 
 ---
 
@@ -94,13 +100,15 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 | Drift detection | **16 sites**, can say *why* a patch did not apply | none | takes community |
 | Ops layer | **15 modules / 1,441 lines** | slim | takes community |
 | Update channel | **works** | repo coordinates left blank | takes community, repointed here |
-| Patch coverage | 88 | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | base is community |
+| Patch coverage | 88 | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | 95 (88 + 7 own) |
 | Runtime hooks | 10 events | **13 events** | on demand |
-| Host write elevation | none | **`ensureHostWritable` suite** | on the roadmap |
-| Drill desk | 10 tabs | **12 tabs + 6 groups** | **12 tabs** (artifacts + evidence + team board merged in) |
+| Host write elevation | none | **`ensureHostWritable` suite** | not ported (see below) |
+| Drill desk | 10 tabs | 12 tabs + 6 groups | **14 tabs / 6 groups** (includes "credentials & files" and the task board) |
 | Skill library | 23 | 40 | **40** (23 + safe's 17, every tool reference checked) |
 | Team task board | none | on by default (root session) | **ported + has a panel entry** (`team/mode` toggle, task-board tab, legacy-switch audit/reset) |
 | Intel data layer | none | KEV / CVE base DB / cloud sync | **ported + has a builder** (kev / cve-db / intel-sync; `scripts/build-cve-db.mjs` builds the local DB from NVD + KEV + EPSS; data is not shipped) |
+
+**Exactly one thing is not ported**: safe's `ensureHostWritable` suite. It answers "how to write when the host directory is read-only", and there is no reproducible scenario for it in this repo's verification environment — no scenario, no check, no ship. That is a stated gap, not a roadmap item.
 
 ### Why not ship safe wholesale
 
@@ -118,7 +126,7 @@ Conversely, three things in safe are worth porting on their own merits. We judge
 - already stronger on the base → skip (`#9` rewrites approval `decide()` to allow outright, which is more thorough than a runtime downgrade);
 - conflicts with the host contract → skip (`#89` moves the system prompt into a `system` field **no provider reads**, i.e. it drops the prompt).
 
-The per-item verdicts and source evidence (including **11 corrections to earlier analysis**) are kept as development-time records and are **not published with this repo**; the README states the conclusions and the reproducible entry points only.
+The per-item verdicts and source evidence are kept as development-time records and are **not published with this repo**; the README states the conclusions and the reproducible entry points only.
 
 ### Why not a plain fork
 
@@ -133,6 +141,7 @@ Here `vendor/` is always a verbatim upstream copy, and every change is "new file
 ### Prerequisites
 
 - DSH Desktop **0.2.2-rc.5** (anything from `0.2.2-rc.1` on also passes)
+- **Node ≥ 22.5** — the redteam layer statically does `import { DatabaseSync } from 'node:sqlite'` at module load, and that builtin only exists from Node 22.5. The requirement is declared in `engines` and check group [34] ties the declaration to the actual import: if the code starts using a later builtin and `engines` does not follow, verification goes red. The runtime bundled with DSH Desktop satisfies this; a system Node only matters when you run `node bin/dsh-purge.js` from a shell.
 - DSH started at least once so the profile is initialised
 - **Remove `dsh-purge-community` or `dsh-purge-safe` first** — all three patch the same host files and the `.dshpurge.bak` baselines would contaminate each other
 - Platform: the base supports macOS / Windows / Linux. Nothing here is platform-specific, but it is **only tested on macOS** — if it misbehaves elsewhere, open an issue with logs
@@ -150,16 +159,18 @@ shasum -a 256 -c SHA256SUMS.txt
 3. DSH panel → **Plugins → Install from file** → pick the tgz → restart DSH.
 
 The release is a plain tarball (`dsh.install.preferred = "tarball"`); installing needs neither git nor an npm registry.
-The repository root is **not** an installable package (there is no `package.json`), so `pnpm add git+…` does not work — use the release asset.
+The repository root is **not** an installable package (there is no `package.json` — it is a build artifact), so `pnpm add git+…` does not work — use the release asset.
 
 ### Option 1: build from source (for people changing the code)
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 31 read-only checks, host untouched
+node scripts/verify.mjs     # 50 read-only checks, host untouched
 ```
 
 Then as above: panel → Plugins → Install from file → pick `dist/dsh-purge-plus-<ver>.tgz` → restart DSH.
+
+The build script enforces two hard constraints of its own: a tarball with the same name but different content is **refused** (otherwise pnpm decides "version unchanged" and reuses the stale copy), and the plugin name in `cordis.patch.yml` must match the package name.
 
 ### Option 2: command line
 
@@ -213,7 +224,16 @@ pnpm remove dsh-purge-plus                                   # remove the plugin
 
 **Why the two inline regexes get their own row**: widening only `FORK_RELEASE_RE` in `update.js` makes the release list appear, but clicking Install throws "only stable releases can be installed" — because `community.js` carries two more hard-coded `/^v\d+\.\d+\.\d+$/`. This was found by running it, not by reading it.
 
-Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · `SHA256SUMS.txt` in the same release · default branch `master` · release must not be a draft or prerelease. Full procedure and troubleshooting in **RELEASE.md**.
+Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · `SHA256SUMS.txt` in the same release · default branch `master` · release must not be a draft or prerelease.
+
+Release procedure (run locally, four steps):
+
+```bash
+node scripts/build.mjs && node scripts/verify.mjs   # all green before going on
+git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
+# create the release and upload dist/dsh-purge-plus-<ver>.tgz and SHA256SUMS.txt
+# verify anonymously: curl -sI <asset URL> returns 200 and the sha256 matches local
+```
 
 > The updater hits `api.github.com` anonymously: 60 requests/hour/IP. On rate limit it degrades to `releases.atom`.
 
@@ -228,13 +248,13 @@ Release convention: tag `v<version>` · asset `dsh-purge-plus-<version>.tgz` · 
 | Stage | Action | On failure |
 | :--- | :--- | :--- |
 | Swap vendor | replace `vendor/community` wholesale | — |
-| Replay overlay | apply 185 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
+| Replay overlay | apply 309 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
-| Verify | 31 read-only checks | any red → non-zero exit |
+| Verify | 50 read-only checks | any red → non-zero exit |
 
 "Exactly N hits" is a hard constraint: 0 hits means the anchor rotted after a host upgrade; ≥2 means it would patch the wrong place. Both fail the build.
 
-See **UPSTREAM.md**.
+The 3 edits marked `required: false` only warn instead of aborting — they are wiring where host-version differences are acceptable: a missing one degrades a feature but does not stop the package from working.
 
 ---
 
@@ -243,6 +263,8 @@ See **UPSTREAM.md**.
 ```bash
 node scripts/verify.mjs
 ```
+
+All 34 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (the ones a reader is most likely to hit):
 
 | # | Check | A failure means |
 | :--- | :--- | :--- |
@@ -254,6 +276,13 @@ node scripts/verify.mjs
 | 6 | Entry loads under DSH's resolution context | export shape changed |
 | 7 | Update channel (tag whitelist / version compare / asset name / coordinate leftovers) | in-app upgrade would break |
 | 8 | `cordis.patch.yml` plugin name matches the package name | bundle would be silently skipped |
+| 26 | Doc numbers vs recomputed code counts (192 / 92 / 88 / 95) | the docs started lying |
+| 28 | Op contract (upstream union 84 vs product 94) | an upstream capability is missing, or the UI names a wrong op |
+| 32 | Docs vs product (tab count / group count / own-patch list / dead file references) | the README describes something the product does not have |
+| 33 | Regression roll-up (all 18 `test-*.mjs` run together) | behaviour is broken while verification stays green |
+| 35 | `engines.node` aligned with the `node:sqlite` import in the code | the declared Node version crashes on install |
+
+**Why [33] exists**: the first 32 groups only inspect structure; none of them runs the 18 behavioural test scripts. So "verify is green" and "nothing is broken" were two different claims — break `dispatch` and everything stays green as long as you avoid the verification assertions. The full run takes a few seconds, so there is no reason to skip it.
 
 Everything is read-only: no host writes, no state changes.
 
@@ -264,19 +293,25 @@ Everything is read-only: no host writes, no state changes.
 ```
 vendor/community/          upstream base, verbatim, read-only at build time
 vendor/safe/               porting source, verbatim, comparison only
-overlay/files/             new files
-  ├─ lib/patches/overlay.mjs   own patch table #201–#206
+overlay/files/             new files (copied over the product)
+  ├─ lib/patches/overlay.mjs   own patch table #201–#208
   ├─ lib/subagent-fence.js     leaf-agent fence
-  └─ NOTICE-PLUS.md            attribution and change record
-overlay/edits.mjs          185 anchor edits
+  ├─ lib/redteam/              ported modules such as team-board-views.js
+  ├─ skills/redteam/           skill library (40 .md files)
+  └─ NOTICE-PLUS.md            attribution and per-file change record
+overlay/snippets/          long code blocks injected into the product (tabs, charts, report rendering …)
+overlay/edits.mjs          309 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         31 read-only checks
+scripts/verify.mjs         50 read-only checks
+scripts/test-*.mjs         18 behavioural regressions (run by verify [33])
+scripts/build-cve-db.mjs   NVD + KEV + EPSS → local CVE base DB
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify
-( `docs/` holds development-time maintenance notes: port verdicts, host compatibility
-  report, release handbook, compliance checklist. Local only — not in the public repo,
-  not shipped in the package. See `/docs/` in .gitignore. )
 ```
+
+`docs/` holds development-time maintenance notes (port verdicts, host compatibility report, release handbook, compliance checklist).
+It is **local only**: not in the public repo and not shipped in the package (see `/docs/` in `.gitignore`).
+That is why this README never references a file inside `docs/` — for a reader those would be dead links.
 
 ---
 
@@ -309,12 +344,15 @@ Its anchor no longer matches after a host upgrade. Run `node scripts/verify.mjs`
 **"Check for updates" says up to date?**
 Make sure the repo is **public** — the plugin queries the GitHub API anonymously, and private repos always 404.
 
+**Installed with no error, but not a single patch is applied?**
+Check that `name:` in `cordis.patch.yml` equals `dsh-purge-plus`. On a mismatch the host **silently skips the whole bundle** and the panel only shows "not running".
+
 ---
 
 ## Credits
 
 - **[dsh-purge](https://github.com/kingcharleslzy-ai/dsh-purge)** (community line) — the base, the patch engine and the ops layer
-- **[dsh-purge-safe](https://github.com/CallMeGuLab/dsh-purge-safe)** — the original design and implementation for the telemetry switches, session-log removal and subagent preset inheritance
+- **[dsh-purge-safe](https://github.com/CallMeGuLab/dsh-purge-safe)** — the original design and implementation for the telemetry switches, session-log removal, subagent preset inheritance, the task board and the intel layer
 - **[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)** — the host itself
 
 <div align="center">

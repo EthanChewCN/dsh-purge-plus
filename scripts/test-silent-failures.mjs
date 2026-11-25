@@ -10,7 +10,11 @@ import os from "node:os";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PKG = path.join(ROOT, "dist", "build", "package");
+/* 既能在仓库里跑（dist/build/package），也能在**已安装的包里**跑（脚本所在包的根）——
+   发布包现在带 test-*.mjs，验收可以对已安装产物复跑（审计 B-5）。 */
+const PKG = fs.existsSync(path.join(ROOT, "dist", "build", "package"))
+  ? path.join(ROOT, "dist", "build", "package")
+  : ROOT;
 
 let pass = 0;
 let fail = 0;
@@ -126,9 +130,10 @@ section("[4] 符号链接形态的技能按目标类型识别");
 /* ── 5. 模板索引：`.github/` 下的 CI 文件不是模板 ───────────────── */
 section("[5] nuclei 模板索引过滤掉非模板 YAML");
 const storeSrc = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
-ok(/if \(!\/\^\\s\*id:\\s\*\\S\+\/m\.test\(head\)\) continue/.test(storeSrc),
+ok(/if \(!\/\^\\s\*id:\\s\*\\S\+\/m\.test\(full\)\) continue/.test(storeSrc),
   "walk() 用顶层 id: 判定是不是模板");
-ok(/Number\(cached\.v \|\| 0\) === 2/.test(storeSrc), "旧索引缓存会作废重算（否则新规则不生效）");
+/* 索引版本升到 3 的原因：元组从 4 位变 5 位（多了 cves 列），旧缓存必须作废重算。 */
+ok(/Number\(cached\.v \|\| 0\) === 3/.test(storeSrc), "旧索引缓存会作废重算（否则新规则不生效）");
 {
   const hasId = (head) => /^\s*id:\s*\S+/m.test(head);
   ok(hasId("id: CVE-2021-44228\ninfo:\n  name: x\n") === true, "真模板（有 id:）保留");

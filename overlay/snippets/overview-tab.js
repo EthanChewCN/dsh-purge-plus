@@ -120,7 +120,9 @@
       const whoBody = whoWaits.length === 0
         ? h('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
           att.coverage_available === false
-            ? '没有人等。覆盖度引擎未启用，无法判断是否还有缺口。'
+            ? (att.coverage_error
+              ? '没有人等，但覆盖度**查不出来**（' + att.coverage_error + '）：不能据此认为这一轮打完了。'
+              : '没有人等。覆盖度引擎未启用，无法判断是否还有缺口。')
             : (Number(att.pending_coverage) > 0
               ? '没有人等，但还有 ' + att.pending_coverage + ' 个覆盖度缺口 —— 该派下一个智能体了。'
               : '没有人等，也没有缺口：这一轮打完了。'))
@@ -169,8 +171,13 @@
         cell('内网主机', cov.internal ? cov.internal.assets : 0,
           cov.internal ? '已收口 ' + cov.internal.closed + ' · 受阻 ' + cov.internal.blocked : ''),
         cell('主机发现', cov.findings, '文件/凭据/提权/横向'),
-        cell('待办缺口', cov.pending ? cov.pending.total : (extTotal + hostTotal),
-          cov.pending ? '外 ' + cov.pending.external + ' · 内 ' + cov.pending.internal : ''))
+        /* [dsh-purge-plus] 查询失败时不能显示「0」：0 是「没有缺口」，查不出来是「不知道」，
+           两者对下一步的影响完全相反。 */
+        cell('待办缺口',
+          (cov.pending && cov.pending.ok === false) ? '查不出来' : (cov.pending ? cov.pending.total : (extTotal + hostTotal)),
+          (cov.pending && cov.pending.ok === false)
+            ? '覆盖度查询失败：0 不代表没有缺口'
+            : (cov.pending ? '外 ' + cov.pending.external + ' · 内 ' + cov.pending.internal : '')))
 
       /* 资源徽章：一行字，不占版面。过期/缺失用颜色区分 ——
          过期还能用（该更新了），缺失是真的没有，两者对下一步的影响不一样。 */

@@ -51,11 +51,31 @@ function handledOps(dir) {
       if (e.isDirectory()) {
         if (e.name !== "node_modules") walk(fp);
       } else if (e.isFile() && e.name.endsWith(".js")) {
+        const rel = path.relative(dir, fp);
+        const LIT = `(?:'([A-Za-z][\\w.]*)'|"([A-Za-z][\\w.]*)")`;
         for (const line of fs.readFileSync(fp, "utf8").split("\n")) {
-          if (!/\bop\s*[!=]==|\bop\)|\bop\b\s*\)|includes\(\s*\w*\.?op\b/.test(line)) continue;
-          for (const m of line.matchAll(/(?:'([A-Za-z][\w.]*)'|"([A-Za-z][\w.]*)")/g)) {
+          /* 只收「参与 op 比较的那个字面量」。
+             以前只要行里出现 `.op` 就把**整行所有字符串**登记成 op：
+             `if (request.op === 'x') return { ok:false, error:'中文文案' }`
+             会把 x / ok / error / 整条文案都算成「已处理的 op」，
+             任何与常见字段名撞名的拼写错误都能蒙混过关（审计 B-7）。 */
+          for (const m of line.matchAll(new RegExp(`\\bop\\s*[!=]==\\s*${LIT}`, "g"))) {
             const op = m[1] || m[2];
-            if (!out.has(op)) out.set(op, path.relative(dir, fp));
+            if (op && !out.has(op)) out.set(op, rel);
+          }
+          /* ['a','b'].includes(op) —— 只收方括号里的那组字面量 */
+          const inc = line.match(new RegExp(`\\[([^\\]]*)\\]\\s*\\.includes\\(\\s*[\\w.]*op\\b`));
+          if (inc) {
+            for (const m of inc[1].matchAll(new RegExp(LIT, "g"))) {
+              const op = m[1] || m[2];
+              if (op && !out.has(op)) out.set(op, rel);
+            }
+          }
+          /* switch (op) { case 'x': } */
+          const cs = line.match(new RegExp(`\\bcase\\s+${LIT}\\s*:`));
+          if (cs && /switch\s*\(\s*[\w.]*op\s*\)/.test(line)) {
+            const op = cs[1] || cs[2];
+            if (op && !out.has(op)) out.set(op, rel);
           }
         }
       }

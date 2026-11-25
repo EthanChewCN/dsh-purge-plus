@@ -16,7 +16,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.dirname(path.dirname(new URL(import.meta.url).pathname));
-const PKG = path.join(ROOT, "dist", "build", "package");
+/* 既能在仓库里跑（dist/build/package），也能在**已安装的包里**跑（脚本所在包的根）——
+   发布包现在带 test-*.mjs，验收可以对已安装产物复跑（审计 B-5）。 */
+const PKG = fs.existsSync(path.join(ROOT, "dist", "build", "package"))
+  ? path.join(ROOT, "dist", "build", "package")
+  : ROOT;
 const PANEL = path.join(PKG, "client.js");
 const RT = path.join(PKG, "lib", "redteam", "client.js");
 

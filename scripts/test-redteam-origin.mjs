@@ -12,9 +12,18 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(new URL(import.meta.url).pathname));
-const UI = path.join(ROOT, "dist", "build", "package", "lib", "redteam", "ui.js");
+/* 既能在仓库里跑（scripts/../dist/build/package），也能在**已安装的包里**跑
+   （发布包现在带 test-*.mjs，脚本所在包的根就是包根；审计 B-5）。
+   注意这里用脚本自身位置而不是 ROOT —— 有些测试的 ROOT 是临时库目录。 */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PKG = fs.existsSync(path.join(HERE, "..", "dist", "build", "package"))
+  ? path.join(HERE, "..", "dist", "build", "package")
+  : path.join(HERE, "..");
+
+const UI = path.join(PKG, "lib", "redteam", "ui.js");
 
 let pass = 0;
 const fails = [];

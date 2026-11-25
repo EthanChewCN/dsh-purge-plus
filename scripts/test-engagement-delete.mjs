@@ -11,10 +11,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const MOD = path.join(ROOT, "dist", "build", "package", "lib", "redteam", "store-core.js");
+/* 既能在仓库里跑（scripts/../dist/build/package），也能在**已安装的包里**跑
+   （发布包现在带 test-*.mjs，脚本所在包的根就是包根；审计 B-5）。
+   注意这里用脚本自身位置而不是 ROOT —— 有些测试的 ROOT 是临时库目录。 */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PKG = fs.existsSync(path.join(HERE, "..", "dist", "build", "package"))
+  ? path.join(HERE, "..", "dist", "build", "package")
+  : path.join(HERE, "..");
+
+const MOD = path.join(PKG, "lib", "redteam", "store-core.js");
 if (!fs.existsSync(MOD)) {
   console.error("dist/build/package 不存在，先跑 node scripts/build.mjs");
   process.exit(1);
@@ -113,8 +122,8 @@ try {
 }
 
 /* ── 8. 构建产物里真的接上了（UI 不是 mock）─────────────────── */
-const panel = fs.readFileSync(path.join(ROOT, "dist", "build", "package", "client.js"), "utf8");
-const full = fs.readFileSync(path.join(ROOT, "dist", "build", "package", "lib", "redteam", "client.js"), "utf8");
+const panel = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+const full = fs.readFileSync(path.join(PKG, "lib", "redteam", "client.js"), "utf8");
 for (const [name, src] of [["面板内嵌", panel], ["独立窗口", full]]) {
   ok(src.includes("function CleanupPanel(props)"), name + "：有 CleanupPanel")
   ok(/CleanupPanel, \{ engagement: eng/.test(src), name + "：CleanupPanel 被挂进凭据与文件页")

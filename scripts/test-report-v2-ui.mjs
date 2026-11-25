@@ -8,10 +8,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { RedteamStore } from "../dist/build/package/lib/redteam/store-core.js";
+import { fileURLToPath } from "node:url";
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "plus-r2ui-"));
-const PKG = path.join(process.cwd(), "dist", "build", "package");
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PKG = fs.existsSync(path.join(HERE, "..", "dist", "build", "package"))
+  ? path.join(HERE, "..", "dist", "build", "package")
+  : path.join(HERE, "..");
+const { RedteamStore } = await import(path.join(PKG, "lib/redteam/store-core.js"));
 let pass = 0;
 let fail = 0;
 const ok = (cond, label, extra) => {

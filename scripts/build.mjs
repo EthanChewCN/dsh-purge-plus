@@ -5,10 +5,11 @@
 //   · vendor/ 永远不被写入（只在构建时读取），升级时整目录替换即可。
 //   · overlay 的改动面（计数方法学见 docs/02）：
 //       - 新增文件：overlay/files/** + overlay/snippets/**
-//       - 锚点编辑：overlay/edits.mjs **179 条**（required 176 / required:false 3）
+//       - 锚点编辑：overlay/edits.mjs **309 条**（required 306 / required:false 3）
 //       - snippet 注入点：§3c **92 处**（两份产物各一遍）
 //       - 品牌文案替换：§3b 4 条；页签修正：§3d
-//     这三个数字由 verify [26] 组现场复算守卫，README 与代码不符即硬失败。
+//     这三个数字由 verify [26] 组现场复算守卫（连这条注释里的数字一起查：
+//     注释写 179 而实际 192 时，读注释的人会以为改动面比真实的小）。
 //   · 任何锚点命中数 ≠ 1 立刻失败，并打印文件、锚点、实际命中次数。
 
 import fs from "node:fs";
@@ -67,9 +68,74 @@ log(`✓ overlay/files 覆盖完成`);
   log(`✓ scripts/build-cve-db.mjs 已随包分发`);
 }
 
+/* 验收脚本随包分发。
+ *
+ * 为什么：`plus.dshCompat.evidenceInRepo: false` 这句以前是实话 —— 发布包里
+ * 一个 test-*.mjs 都没有，验收**无法对已安装产物复跑**，兼容性声明在产物里
+ * 没有任何可复现证据（审计 B-5）。
+ *
+ * 现在把 test-*.mjs 与 theme-toggle 片段一起打进去：装完在包根跑
+ * `node scripts/verify.mjs` 就能自证。测试里 PKG 的解析已改成
+ * 「有 dist/build/package 就用它，否则用脚本所在包的根」，两种位置都能跑。
+ *
+ * 体积代价约 300 KB（包 2.4 MB → 2.7 MB）。
+ */
+{
+  const testDir = path.join(ROOT, "scripts");
+  const outDir = path.join(PKG, "scripts");
+  fs.mkdirSync(outDir, { recursive: true });
+  const tests = fs.readdirSync(testDir).filter((n) => /^test-.*\.mjs$/.test(n));
+  for (const name of tests) fs.copyFileSync(path.join(testDir, name), path.join(outDir, name));
+  /* 验收**调用**的脚本也要随包：只带 test-*.mjs 时，包内跑 verify 会在
+     [28] check-op-contract / [46] mutate-check / [47] check-proof-classes 上红 ——
+     「装完能自证」就成了只在仓库成立的说法（与 B-5 同一类问题）。
+     [45] 有一组断言盯着这份依赖清单。 */
+  const helpers = ["verify.mjs", "check-op-contract.mjs", "check-proof-classes.mjs",
+    "check-mutation-coverage.mjs", "check-vendor-drift.mjs", "check-tracked.mjs",
+    "mutate-check.mjs", "mutations.json"];
+  const shippedHelpers = [];
+  for (const name of helpers) {
+    const src = path.join(testDir, name);
+    if (!fs.existsSync(src)) continue;
+    fs.copyFileSync(src, path.join(outDir, name));
+    shippedHelpers.push(name);
+  }
+  /* theme-toggle 的片段原文：装好的包里它已内联进 client.js，
+     单测需要能拿到可执行的那份源码，所以单独带一份 fixture。 */
+  const fixtureDir = path.join(outDir, "fixtures");
+  fs.mkdirSync(fixtureDir, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "overlay", "snippets", "theme-toggle.js"), path.join(fixtureDir, "theme-toggle.js"));
+  /* verify.mjs 顶上有 `import { resolveRepo } from "../overlay/edits.mjs"`：
+     不带上它，包内跑验收第一行就 ERR_MODULE_NOT_FOUND，「装完能自证」直接不成立。
+     edits.mjs 只依赖 fs/path + 同目录 repo.json，带上这两个就够；op-ledger 是
+     op 契约那组的分母。这三份在 GitHub 上本来就是公开的，不算新增暴露。 */
+  const overlayDir = path.join(PKG, "overlay");
+  fs.mkdirSync(overlayDir, { recursive: true });
+  const overlayFiles = ["edits.mjs", "repo.json", "op-ledger.json"];
+  let overlayShipped = 0;
+  for (const name of overlayFiles) {
+    const src = path.join(ROOT, "overlay", name);
+    if (!fs.existsSync(src)) continue;
+    fs.copyFileSync(src, path.join(overlayDir, name));
+    overlayShipped += 1;
+  }
+  /* 片段与移植模块的**原文**也带上：验收里有一半的组是拿原文和注入后的产物对账
+     （片段真的被内联了吗、移植模块真的被 import 了吗）。只带产物时这些组只能跳过，
+     而「跳过」在验收里就是恒绿。文本压缩比高，包 2.6 → 2.9 MB。 */
+  for (const dir of ["snippets", "files"]) {
+    const src = path.join(ROOT, "overlay", dir);
+    if (!fs.existsSync(src)) continue;
+    fs.cpSync(src, path.join(overlayDir, dir), { recursive: true });
+    overlayShipped += 1;
+  }
+  log(`✓ 验收脚本随包分发（${tests.length} 个 test-*.mjs + ${shippedHelpers.length} 个辅助脚本 + ${overlayShipped} 个 overlay 文件 + 1 个 fixture）`);
+}
+
 // 包内 README 用本仓库的：vendor 带的是 community 的 README，装完在面板里
 // 看到的会是「dsh-purge Community」，用户会以为装的是别人的包。
 fs.copyFileSync(path.join(ROOT, "README.md"), path.join(PKG, "README.md"));
+/* 英文版也带上：验收里「文档组数一致」两组会读它，缺了包内跑 verify 直接 ENOENT。 */
+fs.copyFileSync(path.join(ROOT, "README.en.md"), path.join(PKG, "README.en.md"));
 log(`✓ README.md 用本仓库版本覆盖`);
 
 // 本仓库的维护文档**不进发行物**（docs/ 已从仓库与包内一并移除，只在本机保留）。
@@ -446,6 +512,20 @@ const SNIPPETS = [
     what: "导航分组样式", mode: "after",
     anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
   },
+  // ── 皮肤层：safe 的 token 链（ui-theme → workspace-skin → unified-components）──
+  // 必须排在其它样式之后：它定义 --ui-* / --rt-* 并把组件样式收口，
+  // 顺序反了会被后面的局部规则盖掉。
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", src: "rt-skin.css",
+    what: "皮肤层（token 链）", mode: "after",
+    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
+  },
+  {
+    file: "client.js", dialect: "panel", src: "rt-skin.css",
+    what: "皮肤层（token 链，面板内嵌版）", mode: "after",
+    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
+  },
+
   {
     file: "client.js", dialect: "panel", src: "nav-groups.css",
     what: "导航分组样式（面板内嵌版）", mode: "after",
@@ -533,6 +613,18 @@ const SNIPPETS = [
   //   ① 钩子必须插在 Panel **之前**（同作用域，函数声明会提升，但读代码的人先看到定义）
   //   ② `const full = isFullWindow()` 这一行此时还在，下面那条 replace 才匹配得到
   //   ③ shellProps.ref 必须在 return 之前赋值
+  // ── 主题开关（皮肤层装好之后才有意义：data-theme 要有 --ui-* 的亮色变体可切）──
+  {
+    file: "lib/redteam/client.js", dialect: "redteam", src: "theme-toggle.js",
+    what: "主题开关", mode: "before",
+    anchor: "    function Panel(props) {",
+  },
+  {
+    file: "client.js", dialect: "panel", src: "theme-toggle.js",
+    what: "主题开关（面板内嵌版）", mode: "before",
+    anchor: "  function Panel(props) {",
+  },
+
   {
     file: "lib/redteam/client.js", dialect: "redteam", src: "fullscreen-hook.js",
     what: "站内全屏钩子", mode: "before",
@@ -1236,6 +1328,13 @@ for (const extra of ["NOTICE-PLUS.md", "NOTICE-SAFE.txt", "LICENSE-SAFE-APACHE-2
   }
   if (dropped.length) log(`✓ package.json 剔除死脚本 ${dropped.length} 条：${dropped.join("；")}`);
 }
+/* 运行时门槛：上游写的是 `>=18`，但本包的 redteam 层在模块顶层静态
+   `import { DatabaseSync } from 'node:sqlite'` —— 那是 Node 22.5 才有的内置模块。
+   在 Node 18/20 上装下去不是「功能少一点」，是 `ERR_UNKNOWN_BUILTIN_MODULE` 直接
+   起不来；而 engines 写 >=18 会让包管理器放行，等于把一个必崩的组合标成支持。
+   这里按代码实际依赖改写，verify [34] 组把「声明」和「代码里的 import」绑在一起。 */
+pkg.engines = Object.assign({}, pkg.engines, { node: ">=22.5" });
+
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 log(`✓ package.json 重写：${pkg.name}@${pkg.version}  dshTarget=${pkg.dshTarget}`);
 

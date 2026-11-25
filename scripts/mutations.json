@@ -1,0 +1,442 @@
+[
+  {
+    "id": "M1-proxy-partial-save",
+    "file": "lib/redteam/store-core.js",
+    "find": "      enabled: has('enabled') ? settings.enabled === true : state.policy.enabled,",
+    "replace": "      enabled: settings.enabled === true,",
+    "test": "test-proxy-pool.mjs",
+    "why": "只传超时会把「自动连接」重置成 false（PL-06）",
+    "groups": [
+      37
+    ]
+  },
+  {
+    "id": "M2-cleanup-total",
+    "file": "lib/redteam/store-core.js",
+    "find": "        total = Number(db.prepare('SELECT COUNT(*) AS n FROM cleanup_item'\n          + (where.length ? ' WHERE ' + where.join(' AND ') : '')).get(...args).n) || 0",
+    "replace": "        total = rows.length",
+    "test": "test-cleanup.mjs",
+    "why": "total 退回「当前页长度」，第 2 页永远翻不到（PA-13）",
+    "groups": [
+      19
+    ]
+  },
+  {
+    "id": "M3-preset-wait-dup",
+    "file": "lib/redteam/index.js",
+    "find": "    const boardOnly = src.includes(WAIT_MARK)",
+    "replace": "    const boardOnly = false",
+    "test": "test-r11-fixes.mjs",
+    "why": "预设自愈插出第二段等待文案，旧的那段还在后面（PL-03）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M4-report-retention",
+    "file": "lib/redteam/store-core.js",
+    "find": "      '(SELECT id FROM agent_report WHERE session_id = ? ORDER BY id DESC LIMIT 20)')",
+    "replace": "      '(SELECT id FROM agent_report WHERE session_id = ? ORDER BY id DESC LIMIT 5)')",
+    "test": "test-attention.mjs",
+    "why": "每会话保留的回报条数从 20 掉到 5，唯一未 ack 的 waiting 会被删掉",
+    "groups": [
+      14
+    ]
+  },
+  {
+    "id": "M5-board-bytask",
+    "file": "lib/redteam/store-core.js",
+    "find": "    const group = opts.byTask === true ? \"session_id, COALESCE(team_task_id, '')\" : 'session_id'",
+    "replace": "    const group = 'session_id'",
+    "test": "test-r13-fixes.mjs",
+    "why": "任务板按任务定位退化成按会话，同会话的多张卡只剩一条（PA-03/32）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M6-slot-report-enum",
+    "file": "lib/redteam/tools.js",
+    "find": "enum: ['progress', 'ready', 'blocked', 'waiting', 'failed', 'dropped'], description: '【只有执行子智能体填】",
+    "replace": "enum: ['progress', 'ready', 'blocked', 'waiting'], description: '【只有执行子智能体填】",
+    "test": "test-r15-tools.mjs",
+    "why": "report 枚举退回四个值：子智能体报 failed/dropped 直接被参数校验拒掉（PA-30）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M7-savePrompt-wipe",
+    "file": "lib/redteam/store-core.js",
+    "find": "    if (content === undefined) throw new Error('savePrompt 需要 content（要清空请显式传空字符串）')",
+    "replace": "    if (false) throw new Error('savePrompt 需要 content')",
+    "test": "test-r11-fixes.mjs",
+    "why": "漏传 content 被当成「清空」，整份角色提示词写成 0 字节并退出自动升级（R11-1）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M8-trojan-base64",
+    "file": "lib/redteam/proxy-parse.js",
+    "find": "  if (protocol === 'trojan') { secret = username; username = '' }",
+    "replace": "  if (protocol === 'trojan') { try { secret = Buffer.from(username, 'base64').toString('utf8') } catch { secret = username }; username = '' }",
+    "test": "test-r11-fixes.mjs",
+    "why": "trojan 口令被当 base64 解，节点永久连不上而测试只探端口照样 ok（R11-2）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M9-coverage-swallow",
+    "file": "lib/redteam/store-core.js",
+    "find": "      coverage_available: coverage.available,",
+    "replace": "      coverage_available: true,",
+    "test": "test-r11-fixes.mjs",
+    "why": "覆盖度查不出来被报成「查得出来、没缺口」（R11-3）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M10-template-offset",
+    "file": "lib/redteam/store-core.js",
+    "find": "      const tplOffset = Math.max(Number(req.templateOffset) || 0, 0)",
+    "replace": "      const tplOffset = 0",
+    "test": "test-r14-fixes.mjs",
+    "why": "面板翻页参数被丢，「下一页」永远是同一页而返回 ok:true（PA-08）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M11-cleared-filter",
+    "file": "lib/redteam/store-core.js",
+    "find": "      cleared: queryError === null && openTotal !== null ? openTotal === 0 : null,",
+    "replace": "      cleared: rows.every((r) => r.status !== 'open'),",
+    "test": "test-r14-fixes.mjs",
+    "why": "cleared 按当前页算：只看 status=done 时恒 true，把「还有 20 条没删」报成已收尾（PL-04）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M12-like-escape",
+    "file": "lib/redteam/cve-db.js",
+    "find": "  return '%' + String(text || '').replace(/[%_\\\\]/g, (c) => '\\\\' + c) + '%'",
+    "replace": "  return '%' + String(text || '') + '%'",
+    "test": "test-r14-fixes.mjs",
+    "why": "值里的 % / _ 当通配符：搜一个 % 命中全库，看着像「什么都能搜到」（PL-07）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M13-rollup-drift",
+    "file": "lib/core/verify.mjs",
+    "find": "  if (drifted > 0) return \"drifted\";",
+    "replace": "  if (drifted > 0) return \"skipped\";",
+    "test": "test-r13-fixes.mjs",
+    "why": "漂移被报成 skipped —— 软成功，用户以为只是「这条不用打」（CM-01）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M14-bak-empty",
+    "file": "lib/core.js",
+    "find": "        if (size !== 0) continue;",
+    "replace": "        if (size >= 0) continue;",
+    "test": "test-r13-fixes.mjs",
+    "why": "0 字节 bak 永久占位：backupAll 永远 EEXIST 跳过、revertAll 永远读不出（CM-10）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M15-queue-skip",
+    "file": "lib/redteam/store-core.js",
+    "find": "    const SKIP_STATUS = new Set(['abandoned', 'no_surface'])",
+    "replace": "    const SKIP_STATUS = new Set([])",
+    "test": "test-r14-fixes.mjs",
+    "why": "已放弃的资产重回队列，与提示词「直接跳过」自相矛盾（PA-16）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M16-cve-extract",
+    "file": "lib/redteam/store-core.js",
+    "find": "        for (const cve of (e.name + '\\n' + full).match(/CVE-\\d{4}-\\d{4,7}/gi) || []) cves.add(cve.toUpperCase())",
+    "replace": "        for (const cve of (e.name).match(/CVE-\\d{4}-\\d{4,7}/gi) || []) cves.add(cve.toUpperCase())",
+    "test": "test-r13-fixes.mjs",
+    "why": "只从文件名取 CVE：正文里写编号的模板搜不到（PA-06）",
+    "groups": [
+      50
+    ]
+  },
+  {
+    "id": "M17-stage-backfill-skip",
+    "file": "lib/redteam/schema.js",
+    "find": "  try {\n    const stmt = db.prepare(\"UPDATE attack_step SET stage_code = ? WHERE stage = ? AND (stage_code IS NULL OR stage_code = '')\")\n    for (const [legacy, code] of Object.entries(LEGACY_STAGE_MAP)) stmt.run(code, legacy)\n  } catch { /* 忽略 */ }",
+    "replace": "  try {\n    const stmt = db.prepare(\"UPDATE attack_step SET stage_code = ? WHERE stage = ? AND (stage_code IS NULL OR stage_code = '')\")\n    if (ensure('attack_step', 'stage_code', 'TEXT')) {\n      for (const [legacy, code] of Object.entries(LEGACY_STAGE_MAP)) stmt.run(code, legacy)\n    }\n  } catch { /* 忽略 */ }",
+    "test": "test-silent-failures.mjs",
+    "groups": [
+      12
+    ],
+    "why": "回填只在「这次刚建出 stage_code 列」时执行：老库列已在、值全空就整段跳过，P0 第 1 件静默失败原样复现"
+  },
+  {
+    "id": "M18-sessions-fake-shell",
+    "file": "lib/redteam/store-core.js",
+    "find": "      if (!READ_OPS.has(op)) throw new Error(`unknown op: ${op}`)",
+    "replace": "      if (!READ_OPS.has(op) || op === 'sessions') return { ok: true, items: [], total: 0 }",
+    "test": "test-silent-failures.mjs",
+    "groups": [
+      13
+    ],
+    "why": "没选靶标时 sessions 退回 ok:true 空壳：「本会话还没绑靶标」与「绑了但会话表为空」在面板上同形，P1 绑定层要消掉的正是这个歧义"
+  },
+  {
+    "id": "M19-group-miss-evidence",
+    "file": "lib/redteam/client.js",
+    "find": "        { key: 'results', label: '成果与报告', tabs: ['findings', 'artifacts', 'evidence', 'chain', 'scores', 'report'] },",
+    "replace": "        { key: 'results', label: '成果与报告', tabs: ['findings', 'artifacts', 'chain', 'scores', 'report'] },",
+    "test": "test-nav-groups.mjs",
+    "groups": [
+      15
+    ],
+    "why": "分组表漏掉 evidence：该页签不落在任何二级行里，界面上直接消失（P4 完备性）"
+  },
+  {
+    "id": "M20-escape-overlay-guard",
+    "file": "lib/redteam/client.js",
+    "find": "      if (nestedOverlay) return",
+    "replace": "      if (nestedOverlay && false) return",
+    "test": "test-fullscreen.mjs",
+    "groups": [
+      16
+    ],
+    "why": "Escape 不再让模态浮层先吃：按一次 Esc 把弹窗底下的工作台一起收掉（P5 站内全屏）"
+  },
+  {
+    "id": "M21-finding-downgrade",
+    "file": "lib/redteam/store-core.js",
+    "find": "    const partial = (v) => (v === 'untested' || v === null || v === undefined ? 'partial' : v)",
+    "replace": "    const partial = () => 'partial'",
+    "test": "test-coverage.mjs",
+    "groups": [
+      17
+    ],
+    "why": "结构化发现无条件把维度写成 partial：已经 done 的维度被降级，覆盖度永远收不了口（P7）"
+  },
+  {
+    "id": "M31-attention-overview-degrade",
+    "file": "lib/redteam/client.js",
+    "find": "          api({ op: 'intelStatus' }).catch(function () { return null }),",
+    "replace": "          api({ op: 'intelStatus' }),",
+    "test": "test-attention-badge.mjs",
+    "groups": [
+      18
+    ],
+    "why": "态势首页六路取数少一路降级：intelStatus 一失败 Promise.all 整体 reject，首页从「六块汇总」变成整块红错误，而不是把这一路降成 null"
+  },
+  {
+    "id": "M32-report-v2-internal-entry",
+    "file": "lib/redteam/store-core.js",
+    "find": "        if (!entryAssets.has(aid)) continue",
+    "replace": "        if (false) continue",
+    "test": "test-report-v2.mjs",
+    "groups": [
+      20
+    ],
+    "why": "内网入口判定被短路：只是「被发现」的 10.9.9.9（无会话/凭据/通道）被写进 1.2 内网入口资产，四段式报告凭空多一条入口"
+  },
+  {
+    "id": "M33-scope-cidr-mask",
+    "file": "lib/redteam/store-core.js",
+    "find": "      const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0",
+    "replace": "      const mask = bits === 0 ? 0 : (0xffffffff << bits) >>> 0",
+    "test": "test-composite-tools.mjs",
+    "groups": [
+      21
+    ],
+    "why": "CIDR 掩码位移方向写反（<< bits 而非 << 32-bits）：/24 外的地址被判 in、/8 边界与 /25 后半段同时算错，授权范围核对会放行范围外目标"
+  },
+  {
+    "id": "M34-ledger-empty-flag",
+    "file": "lib/redteam/store-core.js",
+    "find": "      out.empty = out.total === 0 && out.unknown_total === 0",
+    "replace": "      out.empty = out.unresolved_claims === 0",
+    "test": "test-evidence-ledger.mjs",
+    "groups": [
+      22
+    ],
+    "why": "empty 改成 unresolved_claims===0：把「全部核实完毕」画成「还没开始记账」，闭环之后与只剩未解决问题时都误报空账本（假绿灯）"
+  },
+  {
+    "id": "M37-p20-doc-view-jsurl",
+    "file": "client.js",
+    "find": "        const href = link === null ? null : (/^(https?:|mailto:|#|\\/)/i.test(link[2]) ? link[2] : null)",
+    "replace": "        const href = link === null ? null : link[2]",
+    "test": "test-p20.mjs",
+    "groups": [
+      23
+    ],
+    "why": "报告文档视图的行内链接不再校验协议：报告正文里的 javascript: 被渲染成可点链接（渲染器把输入当可信）"
+  },
+  {
+    "id": "M38-todo-cleared-unknown",
+    "file": "lib/redteam/store-core.js",
+    "find": "    out.cleared = queryError === null ? out.open === 0 : null",
+    "replace": "    out.cleared = out.open === 0",
+    "test": "test-p20.mjs",
+    "groups": [
+      19
+    ],
+    "why": "待办清零判据退化：读库失败时 cleared 从 null（未知）变成 true（已清干净）—— 与角标同一条纪律「查不出来不能显示成没人等」"
+  },
+  {
+    "id": "M39-cve-sha-skip",
+    "file": "lib/redteam/intel-sync.js",
+    "find": "    if (sha !== remote.sha256) {",
+    "replace": "    if (sha !== remote.sha256 && options.force !== true) {",
+    "test": "test-intel-cve-sync.mjs",
+    "groups": [
+      30
+    ],
+    "why": "force 时跳过 sha256 校验：下载到被换过的底库照样解压顶替（[3] 那条「看起来更新了、其实写坏了」的主防线没了）"
+  },
+  {
+    "id": "M40-clock-first-seen",
+    "file": "lib/redteam/orchestrator-clock.js",
+    "find": "    if (!firstSeen.has(key)) firstSeen.set(key, now)",
+    "replace": "    firstSeen.set(key, now)",
+    "test": "test-board-clock.mjs",
+    "groups": [
+      36
+    ],
+    "why": "每次观察都刷新首次时刻：「认领多久了」永远是 0 分钟，stall 分支重新变成永远走不到的死路"
+  },
+  {
+    "id": "M41-sandbox-seq-dedupe",
+    "file": "lib/sandbox-follow.js",
+    "find": "        if (marks.has(key)) return;\n        marks.add(key);",
+    "replace": "        marks.add(key);",
+    "test": "test-sandbox-net.mjs",
+    "groups": [
+      38
+    ],
+    "why": "sandbox/mode 的 seq 去重被删：自己补写的宽档会被自己再判一次，同一条事件反复补写"
+  },
+  {
+    "id": "M44-preset-toolfilter-noop",
+    "file": "lib/redteam/index.js",
+    "find": "function stripDeprecatedToolFilter(text) {\n  const src = String(text || \"\")\n",
+    "replace": "function stripDeprecatedToolFilter(text) {\n  const src = String(text || \"\")\n  if (src) return { text: src, changed: false }\n",
+    "test": "test-preset-repair.mjs",
+    "groups": [
+      39
+    ],
+    "why": "toolFilter 剥离器改成直接返回原文：0.2.1 已废弃的 toolFilter 留在预设里，整份预设 registered-broken（自愈第③段失效）"
+  },
+  {
+    "id": "M45-runtime-stale-index",
+    "file": "lib/redteam/bootstrap-runtime.js",
+    "find": "  if (keptNuclei) return\n  try { unlinkSync(join(root, 'pocs', '.nuclei-index.json')) } catch { /* 下次检索重建 */ }\n",
+    "replace": "  if (keptNuclei) return\n",
+    "test": "test-runtime-ensure.mjs",
+    "groups": [
+      40
+    ],
+    "why": "铺底时不再删旧的模板索引：模板换掉/没有之后，检索仍拿着已失效的 .nuclei-index.json 当有效索引"
+  },
+  {
+    "id": "M46-anchor-child-section",
+    "file": "lib/anchor.js",
+    "find": "    if (typeof sp.section === \"function\" && config?.anchorMode !== \"child\") {\n",
+    "replace": "    if (typeof sp.section === \"function\") {\n",
+    "test": "test-anchor-mnemon.mjs",
+    "groups": [
+      41
+    ],
+    "why": "去掉 anchorMode=child 的判断：子会话模式也注册 order 10150 的 section，尾部出现两段互不相同的规则块"
+  },
+  {
+    "id": "M47-vault-empty-bak",
+    "file": "lib/restore-backup.js",
+    "find": "  const stat = hostFs.lstatSync(backup);\n  if (!stat.isFile() || stat.size === 0) throw new Error(`Invalid backup (empty or non-regular), original unchanged; backup retained: ${backup}`);\n  const bytes = hostFs.readFileSync(backup);\n  if (!bytes.length || bytes.length !== stat.size) throw new Error(`Backup changed during read; original unchanged: ${backup}`);\n",
+    "replace": "  const stat = hostFs.lstatSync(backup);\n  const bytes = hostFs.readFileSync(backup);\n",
+    "test": "test-vault-equivalence.mjs",
+    "groups": [
+      42
+    ],
+    "why": "备份非空/非常规校验被拿掉：0 字节 .dshpurge.bak 被当成原件写回，原文件被清空（拒绝变成覆盖）"
+  },
+  {
+    "id": "M48-theme-global-scope",
+    "file": "overlay/snippets/theme-toggle.js",
+    "find": "    var list = containers();\n    for (var i = 0; i < list.length; i += 1) {\n      try { list[i].setAttribute('data-theme', resolved); } catch (e) { /* 单个容器失败不影响其它 */ }\n    }\n",
+    "replace": "    var list = containers();\n    try { document.documentElement.setAttribute('data-theme', resolved); } catch (e) { /* 全局生效 */ }\n",
+    "test": "test-theme-toggle.mjs",
+    "groups": [
+      44
+    ],
+    "why": "主题写到 <html> 而不是自己的容器：插件替宿主做全局明暗决定，容器属性反而没写"
+  },
+  {
+    "id": "M49-badge-empty-state",
+    "file": "client.js",
+    "find": "  if (!total && !pending) return null",
+    "replace": "  if (false) return null",
+    "test": "test-attention-badge.mjs",
+    "groups": [
+      25
+    ],
+    "why": "队列与缺口都空时仍然渲染：屏幕上留下一个「0」的角标，测试的「不占屏幕」判据失效"
+  },
+  {
+    "id": "M50-binding-dangling",
+    "file": "lib/redteam/store-core.js",
+    "find": "    if (!existsSync(this.dbPathOf(engagement))) return false",
+    "replace": "    if (false) return false",
+    "test": "test-session-binding.mjs",
+    "groups": [
+      13
+    ],
+    "why": "绑定不再校验靶标是否存在：写进去的绑定指向一个不存在的靶标，面板跟随到空靶标且永远不会被剪掉"
+  },
+  {
+    "id": "M51-tracked-reverse",
+    "file": "scripts/check-tracked.mjs",
+    "find": "if (untracked.length > 0) problems.push(",
+    "replace": "if (false) problems.push(",
+    "test": "test-tracked.mjs",
+    "groups": [
+      49
+    ],
+    "why": "去掉「overlay/scripts 下不许有未跟踪文件」这一层：新加的构建输入忘了提交也不会红（R18）"
+  },
+  {
+    "id": "M52-artifacts-mask",
+    "file": "client.js",
+    "find": "shown ? value : '••••••••'",
+    "replace": "value",
+    "test": "test-artifacts-tab.mjs",
+    "groups": [
+      11
+    ],
+    "why": "凭据默认不再脱敏：口令以明文进元素树，截屏/共享屏幕直接泄露（P24）"
+  },
+  {
+    "id": "M53-version-eq",
+    "file": "client.js",
+    "find": "|| backend === \"",
+    "replace": "|| backend !== \"",
+    "test": "test-version-notice.mjs",
+    "groups": [
+      10
+    ],
+    "why": "版本比较写反：面板与宿主版本不一致时反而静默，设置看起来「不生效」却没有任何提示（P25）"
+  }
+]

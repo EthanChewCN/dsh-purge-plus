@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 
 const KEV_URLS = [
   'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json',
@@ -28,8 +28,56 @@ function kevEnabled(env = process.env) {
   return String(env.REDTEAM_KEV ?? '') !== '0'
 }
 
+/* [dsh-purge-plus] 路径统一（原样移植后唯一改动）。
+ *
+ * safe 原版把 KEV 存在 `<root>/kb/cve-kev.json`；本包基座 community 的情报层
+ * （store-core.js 的 INTEL_SOURCES + intelStatus + intelUpdate）存在
+ * `<root>/intel/kev.json`，而且存的是 CISA 原始载荷（`vulnerabilities` 数组），
+ * 不是本文件规范化的 `items`。
+ *
+ * 不统一会出现两个副本：面板说「KEV 已更新」，查询读的却是另一份旧数据 ——
+ * 正是 docs/audit/AUDIT-3WAY-2026-11-25.md §4 记的那类「看起来接上了、其实没接」。
+ *
+ * 所以：读认两条路径 + 认两种形状；写只写本包主路径。
+ */
+function kevReadPaths(root) {
+  return [join(root, 'intel', 'kev.json'), join(root, 'kb', 'cve-kev.json')]
+}
+
+/** 写路径固定为本包主路径，避免「有旧文件就写到旧文件」的漂移。 */
 function kevPath(root) {
-  return join(root, 'kb', 'cve-kev.json')
+  return kevReadPaths(root)[0]
+}
+
+/** 找第一条存在的缓存路径。 */
+function kevExistingPath(root) {
+  for (const p of kevReadPaths(root)) {
+    if (existsSync(p)) return p
+  }
+  return ''
+}
+
+/** 规范化：CISA 原始载荷（vulnerabilities[]）与 safe 规范化后的（items[]）都认。 */
+function normalizeKevData(raw) {
+  if (!raw || typeof raw !== 'object') return { fetched_at: 0, count: 0, items: [] }
+  if (Array.isArray(raw.items)) return raw
+  const vulns = Array.isArray(raw.vulnerabilities) ? raw.vulnerabilities : []
+  const items = vulns
+    .map((v) => ({
+      cve: String(v?.cveID ?? '').toUpperCase(),
+      vendor: v?.vendorProject ?? '',
+      product: v?.product ?? '',
+      name: v?.vulnerabilityName ?? '',
+      dateAdded: v?.dateAdded ?? '',
+      dueDate: v?.dueDate ?? '',
+      ransomware: String(v?.knownRansomwareCampaignUse ?? '').toLowerCase() === 'known',
+    }))
+    .filter((x) => x.cve)
+  return {
+    fetched_at: Date.parse(raw.dateReleased || '') || 0,
+    count: items.length,
+    items,
+  }
 }
 
 /** 进程内缓存：{ root → { mtimeMs, data } }，避免每次检索都读 1.6 万条 JSON。 */
@@ -95,12 +143,12 @@ function slim(body) {
  */
 export function kevStatus(root) {
   if (!kevEnabled()) return { available: false, enabled: false, note: '公告层已关闭（REDTEAM_KEV=0）' }
-  const path = kevPath(root)
-  if (!existsSync(path)) return { available: false, enabled: true, count: 0, note: '还没有公告数据（跑一次 redteam_template_refresh action=refresh 或等自动刷新）' }
+  const path = kevExistingPath(root)
+  if (!path) return { available: false, enabled: true, count: 0, note: '还没有公告数据（跑一次 redteam_template_refresh action=refresh 或等自动刷新）' }
   try {
     const stat = statSync(path)
     const cached = memo.get(root)
-    const data = cached && cached.mtimeMs === stat.mtimeMs ? cached.data : JSON.parse(readFileSync(path, 'utf8'))
+    const data = cached && cached.mtimeMs === stat.mtimeMs ? cached.data : normalizeKevData(JSON.parse(readFileSync(path, 'utf8')))
     if (!cached || cached.mtimeMs !== stat.mtimeMs) memo.set(root, { mtimeMs: stat.mtimeMs, data })
     const ageHours = Math.max(0, (Date.now() - Number(data.fetched_at || 0)) / 3600000)
     return {
@@ -131,12 +179,12 @@ export function lookupKev(root, cves) {
     for (const hit of String(raw ?? '').match(/CVE-\d{4}-\d{4,7}/gi) || []) wanted.add(hit.toUpperCase())
   }
   if (wanted.size === 0) return []
-  const path = kevPath(root)
-  if (!existsSync(path)) return []
+  const path = kevExistingPath(root)
+  if (!path) return []
   try {
     const stat = statSync(path)
     const cached = memo.get(root)
-    const data = cached && cached.mtimeMs === stat.mtimeMs ? cached.data : JSON.parse(readFileSync(path, 'utf8'))
+    const data = cached && cached.mtimeMs === stat.mtimeMs ? cached.data : normalizeKevData(JSON.parse(readFileSync(path, 'utf8')))
     if (!cached || cached.mtimeMs !== stat.mtimeMs) memo.set(root, { mtimeMs: stat.mtimeMs, data })
     return (data.items || []).filter((item) => wanted.has(item.cve)).slice(0, 50)
   } catch { return [] }
@@ -163,7 +211,8 @@ export async function refreshKevIfStale(options = {}) {
       const body = await fetchJson(url, timeoutMs)
       const payload = slim(body)
       if (payload.count === 0) throw new Error('返回里没有漏洞条目')
-      mkdirSync(join(root, 'kb'), { recursive: true })
+      /* 写路径是本包主路径（<root>/intel/kev.json），目录要按它建 */
+      mkdirSync(dirname(kevPath(root)), { recursive: true })
       writeFileSync(kevPath(root), JSON.stringify(payload), 'utf8')
       memo.delete(root)
       return { action: 'refreshed', count: payload.count }

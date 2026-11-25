@@ -66,6 +66,90 @@
       "summary": "情报库增量更新（target/dry_run/dest），异步、可干跑。",
       "why": "safe 的 intelRefresh 只刷新不落地；这里补可干跑的更新入口。",
       "guard": "test-composite-tools.mjs"
+    },
+    "proxyPoolGet": {
+      "kind": "read",
+      "summary": "代理池快照：节点清单（口令只给 passwordSet）、连接策略、当前生效节点、切换日志。",
+      "why": "safe 2.0.2 只有前端，服务端没有这 12 个 op（调用返回 unknown op）；本包从零实现。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyPoolSave": {
+      "kind": "write",
+      "summary": "保存连接策略：enabled / autoConnect / timeoutMs（500–60000 收敛）/ enginePath。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyProfileSave": {
+      "kind": "write",
+      "summary": "新增或更新一个节点；省略 secret 保留旧口令，传空串才清空。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyProfileDelete": {
+      "kind": "write",
+      "summary": "删除单个节点；删的正好是生效节点时一并清空 activeId。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyProfilesDelete": {
+      "kind": "write",
+      "summary": "批量删除节点（面板多选删除用）。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyPoolImport": {
+      "kind": "write",
+      "summary": "从 Clash proxies 段 / URI 列表 / base64 订阅批量导入，按协议+主机+端口+账号去重，封顶 200。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyConfigImport": {
+      "kind": "read",
+      "summary": "只解析不写盘：返回 candidates + warnings，供面板先预览再导入。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyProfileTest": {
+      "kind": "write(async)",
+      "summary": "对一个节点做一次 TCP 连通性探测，把 status/latencyMs 写回节点。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyPoolTest": {
+      "kind": "write(async)",
+      "summary": "串行探测多个节点（并发会触发本机连接表限速，延迟没意义），返回 testSummary。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyProfileConnect": {
+      "kind": "write(async)",
+      "summary": "先探测再把节点设为生效节点；**连不上就 ok:false 且不切换**。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyPoolConnect": {
+      "kind": "write(async)",
+      "summary": "探测所有启用节点，把延迟最低的设为生效节点；全失败则不切换。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "proxyPoolDisconnect": {
+      "kind": "write",
+      "summary": "清空生效节点，回报原值。",
+      "why": "同上。",
+      "guard": "test-proxy-pool.mjs"
+    },
+    "runtimeEnsure": {
+      "kind": "write(async)",
+      "summary": "铺红队数据目录：知识库 DDL、pocs/toolkit、平台配置；download:true 时顺带拉 nuclei 模板（git/tar/zip 多镜像回退）。",
+      "why": "safe 2.0.2 bootstrap-runtime.js。上游在 apply 里后台下载；本包只做本地那半，下载必须显式触发 —— 启动不该有不可见的出口动作。",
+      "guard": "test-runtime-ensure.mjs"
+    },
+    "mnemonSettings": {
+      "kind": "write(async)",
+      "summary": "读/写 mnemon 开关（keepMnemon）：true 时 identity 的 prompt 改写保留宿主的 mnemon（记忆层）段。",
+      "why": "safe 2.0.2 mnemon-settings.js。基座 identity.js 无条件摘掉 mnemon 段，safe 给了个开关；本包把开关接出来，不用手改 JSON。",
+      "guard": "test-anchor-mnemon.mjs"
     }
   }
 }

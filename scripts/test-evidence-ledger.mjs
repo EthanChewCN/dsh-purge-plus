@@ -10,10 +10,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { RedteamStore, dispatch } from "../dist/build/package/lib/redteam/store-core.js";
-import { EvidenceLedger, UnknownRegistry } from "../dist/build/package/lib/redteam/evidence-ledger.mjs";
+import { fileURLToPath } from "node:url";
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "plus-ledger-"));
+/* 既能在仓库里跑（scripts/../dist/build/package），也能在**已安装的包里**跑
+   （发布包现在带 test-*.mjs，脚本所在包的根就是包根；审计 B-5）。
+   注意这里用脚本自身位置而不是 ROOT —— 有些测试的 ROOT 是临时库目录。 */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PKG = fs.existsSync(path.join(HERE, "..", "dist", "build", "package"))
+  ? path.join(HERE, "..", "dist", "build", "package")
+  : path.join(HERE, "..");
+const { RedteamStore, dispatch } = await import(path.join(PKG, "lib/redteam/store-core.js"));
+const { EvidenceLedger, UnknownRegistry } = await import(path.join(PKG, "lib/redteam/evidence-ledger.mjs"));
+
 const store = new RedteamStore(ROOT);
 let pass = 0;
 let fail = 0;

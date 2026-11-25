@@ -14,7 +14,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const PKG = path.join(ROOT, "dist", "build", "package");
+/* 既能在仓库里跑（dist/build/package），也能在**已安装的包里**跑（脚本所在包的根）——
+   发布包现在带 test-*.mjs，验收可以对已安装产物复跑（审计 B-5）。 */
+const PKG = fs.existsSync(path.join(ROOT, "dist", "build", "package"))
+  ? path.join(ROOT, "dist", "build", "package")
+  : ROOT;
 const MOD = path.join(PKG, "lib", "redteam", "store-core.js");
 
 if (!fs.existsSync(MOD)) {
@@ -69,9 +73,14 @@ check("同 target + 同 kind 且未收口 → 去重，不新增行", () => {
   eq(store.listCleanup(id, {}).total, 1, "行数不该增加");
 });
 
-check("kind 非法 / title 为空都被拒绝", () => {
+check("kind 非法被拒；title 缺省时自动生成（R14 起不再抛）", () => {
   throws(() => store.addCleanup(id, { kind: "nonsense", title: "x" }), "kind", "非法 kind");
-  throws(() => store.addCleanup(id, { kind: "file", title: "   " }), "title", "空标题");
+  /* [dsh-purge-plus] R14：safe 只要求 kind，从 safe 迁移的调用方一律不带 title，
+     硬抛等于让它们全失败。改成按 kind/target/location 生成可读标题。 */
+  const auto = store.addCleanup(id, { kind: "file", title: "   ", target: "203.0.113.10", location: "/tmp/x" });
+  eq(auto.deduped, false, "空标题也能建（自动生成）");
+  const row = store.listCleanup(id, {}).items.find((x) => x.id === auto.cleanup_id);
+  eq(row.title.includes("自动生成"), true, "标题标了「自动生成」");
 });
 
 check("status 校验：只认 open / done / wontfix", () => {
@@ -99,13 +108,32 @@ check("done 之后 cleared 变 true", () => {
 check("去重只挡未收口的：已 done 之后再登记同一处会新增", () => {
   const again = store.addCleanup(id, { asset_id: ext, kind: "webshell", title: "又被传了一次", target: "http://203.0.113.10/cmd.php" });
   eq(again.deduped, false, "收口之后同一个位置再出现，是新的待办");
-  eq(store.listCleanup(id, {}).total, 2);
+  /* 上一条「空标题自动生成」会多留一条，总数按实际条数比 —— 这里比的是「新增了没有」，
+     不是绝对条数，所以用 >= 原值+1 的形式更稳。 */
+  eq(store.listCleanup(id, {}).total >= 2, true, "两条都在（含上一条自动标题的）");
 });
 
 check("按 status / kind 过滤", () => {
   eq(store.listCleanup(id, { status: "open" }).total, 1);
   eq(store.listCleanup(id, { kind: "webshell" }).total, 2);
   eq(store.listCleanup(id, { kind: "account" }).total, 0);
+});
+
+check("翻页：total 是整表条数，不是当前页长度（PA-13）", () => {
+  /* 三条、每页两条。旧代码 total = rows.length，第 1 页报 2，
+     调用方以为只有两条，第二页永远拿不到。 */
+  store.addCleanup(id, { asset_id: ext, kind: "account", title: "翻页样本 A" });
+  store.addCleanup(id, { asset_id: ext, kind: "account", title: "翻页样本 B" });
+  store.addCleanup(id, { asset_id: ext, kind: "account", title: "翻页样本 C" });
+  const all = store.listCleanup(id, { kind: "account" });
+  eq(all.total, 3, "整表 3 条");
+  const p1 = store.listCleanup(id, { kind: "account", limit: 2, offset: 0 });
+  const p2 = store.listCleanup(id, { kind: "account", limit: 2, offset: 2 });
+  eq(p1.total, 3, "第 1 页 total 仍是 3（不是 2）");
+  eq(p1.returned, 2, "第 1 页返回 2 条");
+  eq(p2.returned, 1, "第 2 页返回 1 条");
+  const ids1 = p1.items.map((x) => x.id), ids2 = p2.items.map((x) => x.id);
+  eq(ids1.some((x) => ids2.includes(x)), false, "两页不重叠");
 });
 
 check("cleanupSummary 与 list 的计数一致", () => {

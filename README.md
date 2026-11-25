@@ -7,10 +7,10 @@
 把「宿主层」和「模型层」分开看：模型愿不愿意答是一件事，宿主在它前面加了多少道闸是另一件事。
 
 [![Release](https://img.shields.io/github/v/release/EthanChewCN/dsh-purge-plus?label=release&color=6E56CF)](https://github.com/EthanChewCN/dsh-purge-plus/releases)
-[![Patches](https://img.shields.io/badge/宿主补丁-95-3B82F6)]
+[![Patches](https://img.shields.io/badge/宿主补丁-95-3B82F6)](#能力清单)
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5-22D3EE)](https://github.com/deepseek-ai/deepseek-harness)
-[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)]
-[![Node](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=node.js&logoColor=fff)](package.json)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](#许可与署名)
+[![Node](https://img.shields.io/badge/Node.js-%E2%89%A522.5-339933?logo=node.js&logoColor=fff)](#前置)
 
 当前版本见上方 Release 徽章（不写死：每发一版都要改文档，改完文档又要再发一版）· 适配 **DSH Desktop 0.2.2-rc.5** · [English](README.en.md)
 
@@ -54,15 +54,15 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 ```
 基座   dsh-purge Community   MIT         宿主补丁 · 补丁引擎 · 运维层
 移植   dsh-purge safe        Apache-2.0  能力面更宽的一条支线
-结果   dsh-purge-plus        独立变体     95 条补丁 · 31 组只读验收
+结果   dsh-purge-plus        独立变体     95 条补丁 · 50 组只读验收
 ```
 
 本仓库**不是** community 的 fork，也**不是** safe 的 fork。它把两个上游都当作只读输入：
 
 - `vendor/community/` —— 基座，原样副本，构建时只读；
 - `vendor/safe/` —— 移植来源，原样副本，只用于比对；
-- `overlay/` —— 本仓库**全部**改动：新增文件 + **185 条锚点编辑**（`required` 182 / `required:false` 3）
-  + **92 处 snippet 注入点** + 4 条品牌文案替换。改动面由 `verify [26]` 组现场复算守卫，
+- `overlay/` —— 本仓库**全部**改动：新增文件 + **309 条锚点编辑**（`required` 306 / `required:false` 3）
+  + **96 处 snippet 注入点** + 4 条品牌文案替换。改动面由 `verify [26]` 组现场复算守卫，
   文档数字与代码不符即验收失败。
 
 ---
@@ -71,17 +71,24 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 
 | 层 | 内容 |
 | :--- | :--- |
-| **宿主补丁** | **95 条** = 上游 88 + 自有 7（id ≥ 201） |
+| **宿主补丁** | **95 条** = 上游 88 + 自有 7（id ≥ 201，全部逐条列在下面） |
 | 自有 #201 | `PRODUCT_ANALYTICS_DEFAULT_OFF` —— 产品埋点默认关 |
 | 自有 #202 | `PRODUCT_TELEMETRY_OTEL_NOOP` —— 产品遥测 OTLP 导出器变空实现 |
 | 自有 #203 | `SESSION_TELEMETRY_OTEL_DISABLED` —— 会话遥测默认 `DISABLED` |
 | 自有 #205 | `SESSION_LOG_CLOUD_UPLOAD_UNREGISTER` —— Session Log 上传在注册点短路 |
 | 自有 #206 | `SUBAGENT_INHERIT_PARENT_ACCESS` —— 子代理原样继承父会话权限档 |
+| 自有 #207 | `BLANK_REUSE_KEEPS_RECORDED_PRESET` —— 复用空白会话时沿用日志里记下的预设（冷路径） |
+| 自有 #208 | `LIVE_BLANK_REUSE_KEEPS_RECORDED_PRESET` —— 活着的空白会话同样沿用（活路径） |
 | 自有模块 | `lib/subagent-fence.js` —— 子代理（叶子节点）不得再派活 |
-| 补丁引擎 | 30 个 schema 字段：`drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
+| 补丁引擎 | **30 个描述符字段**：`drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
+| 后端 op | **106 条**（两家上游并集 84 + 自有 22），UI 引用 68 条，全部可解析 |
 | 运维层 | 审计流水 `audit.jsonl`、跨进程维护锁、回滚事务、逐层自检、运行时探针、漂移检测 |
 | 在线升级 | 面板「检查更新」可用，匿名拉 GitHub 发行，逐字节核 `SHA256SUMS.txt` |
-| 演练台 | 左侧栏整页设置 + 红队事实库（SQLite），12 个页签 |
+| 演练台 | 左侧栏整页设置 + 红队事实库（SQLite），**14 个页签 / 6 个一级分组** |
+| 技能库 | **40 个**（community 23 + safe 独有 17），每条引用的工具都已注册 |
+| 代理池 | **12 个 op + 1 个工具**：节点增删改查、Clash/URI/base64 订阅导入、TCP 连通性探测、选生效节点。**不改本机网络、不起引擎**（上游 safe 只有前端，服务端无实现） |
+
+#207 / #208 是同一件事的两条路径：`#207` 补的是会话还没活起来时的 `observeSession → resume`，`#208` 补的是活会话的 `claim()` 分支。只补一条时，「刚选完模式、会话还活着」这个最常见场景仍会被静默写回默认预设 —— 所以两条必须成对存在。
 
 ---
 
@@ -95,13 +102,15 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 漂移检测 | **16 处**，能说出「为什么没打上」 | 无 | 取 community |
 | 运维层 | **15 个模块 / 1,441 行** | 精简 | 取 community |
 | 更新通道 | **可用** | 仓库坐标留空 | 取 community，改指本仓库 |
-| 补丁覆盖 | 88 条 | 59 条（2.0.0）/ 62（2.0.1）/ 64（2.0.2） | 以 community 为基 |
+| 补丁覆盖 | 88 条 | 59 条（2.0.0）/ 62（2.0.1）/ 64（2.0.2） | 95 条（88 + 自有 7） |
 | 运行时钩子 | 10 个事件 | **13 个事件** | 按需 |
-| 宿主写入提权 | 无 | **`ensureHostWritable` 四件套** | 已列入路线图 |
-| 演练台 | 10 tab | 12 tab + 6 分组 | **11 tab**（已并入「凭据与文件」）；6 分组导航在路线图 |
+| 宿主写入提权 | 无 | **`ensureHostWritable` 四件套** | 未移植（见下） |
+| 演练台 | 10 tab | 12 tab + 6 分组 | **14 个页签 / 6 个分组**（已含「凭据与文件」「任务板」） |
 | 技能库 | 23 个 | 40 个 | **40 个**（23 + safe 独有 17，逐条核对工具引用） |
 | 团队任务板 | 无 | 默认开（根会话） | **已移植 + 有面板入口**（`team/mode` 开关、任务板页签、历史开关审计/清理） |
 | 情报数据层 | 无 | KEV / CVE 底库 / 云同步 | **已移植 + 有构建器**（kev / cve-db / intel-sync；`scripts/build-cve-db.mjs` 从 NVD + KEV + EPSS 建本机库，数据不随包发） |
+
+**未移植的只有一件**：safe 的 `ensureHostWritable` 四件套。它解决的是「宿主目录只读时怎么提权写入」，在本仓库的验证环境里没有可复现的场景 —— 没有场景就没有验收，没有验收就不进包。这不是路线图，是明确的缺口。
 
 ### 为什么不整包用 safe
 
@@ -119,7 +128,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 - 基座已有更强实现的 → 不搬（`#9` 已把审批 `decide()` 直接改成放行，比 safe 的运行时降级更彻底）；
 - 与宿主契约冲突的 → 不搬（`#89` 把系统提示词塞进一个**没有 provider 会读**的 `system` 字段，等于丢提示词）。
 
-逐条判定与源码证据（含**上轮判断的 11 处勘误**）在开发期逐条留证，**不随仓库发布**；README 只给结论与可复现的入口。
+逐条判定与源码证据在开发期维护文档里逐条留证，**不随仓库发布**；README 只给结论与可复现的入口。
 
 ### 为什么不是简单 fork
 
@@ -134,6 +143,10 @@ fork-and-edit 的第二次升级必死：上游一动，本地改动全变成冲
 ### 前置
 
 - DSH Desktop **0.2.2-rc.5**（`0.2.2-rc.1` 起同样通过）
+- **Node ≥ 22.5** —— redteam 层在模块顶层静态 `import { DatabaseSync } from 'node:sqlite'`，
+  这个内置模块 Node 22.5 才有。声明写在 `engines` 里，`verify [34]` 组把「声明」和
+  「代码里的 import」绑在一起：代码用了更晚的内置模块而 `engines` 没跟上，验收就红。
+  DSH Desktop 自带的运行时满足这一条；只有在命令行侧手动跑 `node bin/dsh-purge.js` 时才需要系统 Node 到位。
 - 已至少启动过一次 DSH，profile 已初始化
 - 平台：基座本身覆盖 macOS / Windows / Linux；本仓库的改动不分平台，但**只在 macOS 上实测过** ——
   Windows / Linux 上用出问题请带日志开 issue，不要当成"应该没问题"
@@ -152,16 +165,19 @@ shasum -a 256 -c SHA256SUMS.txt
 3. DSH 面板 → **插件 → 从文件安装** → 选那个 tgz → 重启 DSH。
 
 发行包是纯 tarball（`dsh.install.preferred = "tarball"`），安装时不需要 git、不需要 npm 源。
-本仓库根目录**不是**一个可安装的包（没有 `package.json`），所以 `pnpm add git+…` 走不通 —— 请用发行包。
+本仓库根目录**不是**一个可安装的包（没有 `package.json`，它是构建产物），所以 `pnpm add git+…` 走不通 —— 请用发行包。
 
 ### 方式一：从源码构建（给改代码的人）
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 31 组只读验收，不动宿主
+node scripts/verify.mjs     # 50 组只读验收，不动宿主
 ```
 
 然后同上：面板 → 插件 → 从文件安装 → 选 `dist/dsh-purge-plus-<ver>.tgz` → 重启 DSH。
+
+构建脚本自带两条硬约束：同名 tgz 已存在但内容不同会**直接拒绝**（否则 pnpm 会认「版本没变」复用旧副本），
+以及 `cordis.patch.yml` 里的插件名必须与包名一致。
 
 ### 方式二：命令行
 
@@ -215,7 +231,16 @@ pnpm remove dsh-purge-plus                                   # 摘掉插件
 
 **为什么「两处内联正则」单列**：只放宽 `update.js` 的 `FORK_RELEASE_RE` 时，发行列表能列出来，但点「安装」会抛「只安装正式发布版本」—— 因为 `community.js` 里还有两个硬编码的 `/^v\d+\.\d+\.\d+$/`。这是实测踩到的，不是推测。
 
-发布约定：tag `v<version>` · 资产 `dsh-purge-plus-<version>.tgz` · 同 release 下 `SHA256SUMS.txt` · 默认分支 `master` · release 不能是 draft / prerelease。完整流程与排错表见 **RELEASE.md**。
+发布约定：tag `v<version>` · 资产 `dsh-purge-plus-<version>.tgz` · 同 release 下 `SHA256SUMS.txt` · 默认分支 `master` · release 不能是 draft / prerelease。
+
+发布流程（本机执行，四步）：
+
+```bash
+node scripts/build.mjs && node scripts/verify.mjs   # 全绿才继续
+git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
+# 建 release 并上传 dist/dsh-purge-plus-<ver>.tgz 与 SHA256SUMS.txt
+# 匿名验证：curl -sI <资产 URL> 应 200，且 sha256 与本地一致
+```
 
 > 更新器默认匿名访问 `api.github.com`，配额 60 次/小时/IP。撞限流会自动降级到 `releases.atom`。
 
@@ -230,13 +255,13 @@ pnpm remove dsh-purge-plus                                   # 摘掉插件
 | 阶段 | 动作 | 失败会怎样 |
 | :--- | :--- | :--- |
 | 换 vendor | 整目录替换 `vendor/community` | — |
-| 重放 overlay | 185 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
+| 重放 overlay | 309 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
 | 重建 | vendor + overlay → `dist/package` → tgz | 断言不符 → 中止 |
-| 验收 | 31 组只读检查 | 任一组红 → 非零退出 |
+| 验收 | 50 组只读检查 | 任一组红 → 非零退出 |
 
 锚点「恰好命中 N 次」是硬约束：命中 0 次 = 宿主升级后锚点烂了；命中 ≥2 次 = 会打歪。两种情况都直接失败。
 
-详见 **UPSTREAM.md**。
+`required: false` 的 3 条只警告不中止 —— 它们是宿主版本差异可接受的接线，缺了功能退化但不至于跑不起来。
 
 ---
 
@@ -245,6 +270,8 @@ pnpm remove dsh-purge-plus                                   # 摘掉插件
 ```bash
 node scripts/verify.mjs
 ```
+
+全部 50 组都写在 `scripts/verify.mjs` 里，下面只是**节选**（挑读者最可能踩的几条）：
 
 | # | 检查 | 失败意味着 |
 | :--- | :--- | :--- |
@@ -256,6 +283,13 @@ node scripts/verify.mjs
 | 6 | 插件入口在 DSH 解析上下文下加载成功 | 导出形状变了 |
 | 7 | 在线更新通道（tag 白名单 / 版本比较 / 资产名 / 坐标残留） | 面板升级会失效 |
 | 8 | `cordis.patch.yml` 插件名与包名一致 | bundle 会被静默跳过 |
+| 26 | 文档数字 vs 代码复算（192 / 92 / 88 / 95） | 文档开始说谎 |
+| 28 | op 契约（两家上游并集 84 vs 产物 106） | 上游能力面漏移植或 UI 写错 op 名 |
+| 32 | 文档与产物一致性（页签数 / 分组数 / 自有补丁清单 / 悬空文件引用） | README 描述的东西产物里没有 |
+| 33 | 回归测试汇总（18 个 `test-*.mjs` 一起跑） | 行为坏了而验收照样绿 |
+| 35 | `engines.node` 与代码里 `node:sqlite` 的 import 对齐 | 声明支持的 Node 版本装下去会直接崩 |
+
+**[33] 存在的原因**：在 [33] 之前，验收只查结构，没有一组会跑那 18 个行为测试。于是「verify 全绿」和「行为没坏」是两件事 —— 有人把 `dispatch` 改坏，只要不碰验收断言就照样绿。全量跑完只要几秒，没有理由不跑。
 
 全部只读，不写宿主、不改状态。
 
@@ -266,18 +300,25 @@ node scripts/verify.mjs
 ```
 vendor/community/          上游基座，原样副本，构建时只读
 vendor/safe/               移植来源，原样副本，只用于比对
-overlay/files/             新增文件
-  ├─ lib/patches/overlay.mjs   自有补丁表 #201–#206
+overlay/files/             新增文件（覆盖进产物）
+  ├─ lib/patches/overlay.mjs   自有补丁表 #201–#208
   ├─ lib/subagent-fence.js     叶子节点围栏
-  └─ NOTICE-PLUS.md            署名与改动记录
-overlay/edits.mjs          185 条锚点编辑清单
+  ├─ lib/redteam/              team-board-views.js 等移植模块
+  ├─ skills/redteam/           技能库（40 个 .md）
+  └─ NOTICE-PLUS.md            署名与逐文件改动记录
+overlay/snippets/          注入产物的长段代码（页签、图表、报告渲染…）
+overlay/edits.mjs          309 条锚点编辑清单
 overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         31 组只读验收
+scripts/verify.mjs         50 组只读验收
+scripts/test-*.mjs         18 个行为回归（被 verify [33] 汇总执行）
+scripts/build-cve-db.mjs   NVD + KEV + EPSS → 本机 CVE 底库
 scripts/sync-upstream.sh   上游升级：换 vendor → 重放 → 重建 → 验收
-（`docs/` 为开发期维护文档：移植判定、宿主兼容报告、发布手册、许可与署名合规清单。
- 只在本机保留，不进公开仓库，也不随发行物分发 —— 见 .gitignore 的 /docs/。）
 ```
+
+`docs/` 是开发期维护文档（移植判定、宿主兼容报告、发布手册、许可与署名合规清单），
+**只在本机保留**：不进公开仓库，也不随发行物分发（见 `.gitignore` 的 `/docs/`）。
+因此 README 里不引用任何 `docs/` 内的文件名 —— 那对读者是死链。
 
 ---
 
@@ -310,12 +351,15 @@ Apache-2.0 §4(b) 的**逐文件改动记录**在包内 `NOTICE-PLUS.md` 第 2 �
 **面板「检查更新」说已是最新？**
 确认仓库是**公开**的 —— 插件是匿名拉 GitHub API 的，私有仓库一律 404。
 
+**装完没有任何报错，但补丁一条都没打上？**
+先看 `cordis.patch.yml` 的 `name:` 是否等于 `dsh-purge-plus`。名字对不上时宿主会**静默跳过整个 bundle**，面板只会显示"未运行"。
+
 ---
 
 ## 致谢
 
 - **[dsh-purge](https://github.com/kingcharleslzy-ai/dsh-purge)**（community 线）—— 提供了本项目的基座、补丁引擎与运维层
-- **[dsh-purge-safe](https://github.com/CallMeGuLab/dsh-purge-safe)** —— 提供了遥测关闭、Session Log 移除、子代理权限继承的原始设计与实现
+- **[dsh-purge-safe](https://github.com/CallMeGuLab/dsh-purge-safe)** —— 提供了遥测关闭、Session Log 移除、子代理权限继承、任务板与情报层的原始设计与实现
 - **[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)** —— 宿主本身
 
 <div align="center">

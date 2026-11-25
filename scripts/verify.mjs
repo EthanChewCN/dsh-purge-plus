@@ -16,22 +16,33 @@ import crypto from "node:crypto";
 import { resolveRepo } from "../overlay/edits.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PKG = path.join(ROOT, "dist", "build", "package");
+/* 两种运行位置：仓库里（ROOT 有 dist/build/package）与装好的包里（ROOT 就是包根）。
+   不这样解析的话，「装完在包根跑 node scripts/verify.mjs 就能自证」永远走不到第二行。 */
+const PKG = fs.existsSync(path.join(ROOT, "dist", "build", "package"))
+  ? path.join(ROOT, "dist", "build", "package")
+  : ROOT;
 const AI_BASE = process.env.DSH_BASE
   || "/Applications/DeepSeek Harness.app/Contents/Resources/app/dsh/node_modules/@deepseek-ai";
 
 let failed = 0;
+let skipped = 0;
 const ok = (s) => console.log(`  ✓ ${s}`);
 const bad = (s) => { console.error(`  ✗ ${s}`); failed++; };
+/* 仓库侧才有原文（vendor/ 上游副本、dist/ 里的 tgz）。装好的包里没有这些，
+   对应的组**明确报「不适用」并计数**，不静默跳过 —— 跳过在验收里就是恒绿。
+   上限见文件末尾：不适用组数超过 SKIP_CAP 就是有人在拿「不适用」当挡箭牌。 */
+const IN_REPO = ROOT !== PKG && fs.existsSync(path.join(ROOT, "vendor", "community"));
+const na = (m) => { skipped += 1; console.log(`  ○ 不适用：${m}`); };
 
-if (!fs.existsSync(PKG)) {
-  console.error("dist/build/package 不存在，先跑 node scripts/build.mjs");
+if (!fs.existsSync(path.join(PKG, "package.json"))) {
+  console.error(`${PKG} 不是产物目录（没有 package.json）。仓库里先跑 node scripts/build.mjs。`);
   process.exit(1);
 }
+console.log(`产物根 ${PKG}`);
 console.log(`宿主根 ${AI_BASE}\n`);
 
 // ── 1. import ───────────────────────────────────────────────────
-console.log("[1] 模块可加载");
+console.log("[1] 模块可加载");  // 结构
 const probe = `
 const idx = await import("./lib/patches/index.mjs");
 const fence = await import("./lib/subagent-fence.js");
@@ -39,7 +50,7 @@ const ids = idx.ALL_PATCHES.map(p => p.id);
 const ours = idx.ALL_PATCHES.filter(p => p.id >= 201);
 console.log(JSON.stringify({
   total: ids.length,
-  ours: ours.map(p => ({ id: p.id, name: p.name, file: p.file, patterns: (p.replacements||[]).map(r => r.pattern) })),
+  ours: ours.map(p => ({ id: p.id, name: p.name, file: p.file, markers: p.markers || [], patterns: (p.replacements||[]).map(r => r.pattern) })),
   dup: ids.filter((v,i)=>ids.indexOf(v)!==i),
   fence: typeof fence.installSubagentFence,
 }));
@@ -54,7 +65,7 @@ try {
 }
 
 // ── 2. 不变式 ───────────────────────────────────────────────────
-console.log("[2] 补丁表不变式");
+console.log("[2] 补丁表不变式");  // 结构
 r.total === 95 ? ok(`总数 ${r.total}`) : bad(`总数应为 95，实际 ${r.total}`);
 r.ours.length === 7 ? ok(`自有 ${r.ours.length} 条（≥201）`) : bad(`自有应为 7，实际 ${r.ours.length}`);
 r.dup.length === 0 ? ok("id 无重复") : bad(`id 重复: ${r.dup}`);
@@ -109,7 +120,7 @@ console.log("[2b] 预设模板插件名");
 }
 
 // ── 3. 宿主定位 ─────────────────────────────────────────────────
-console.log("[3] 真实宿主 --status");
+console.log("[3] 真实宿主 --status");  // 结构
 let status = "";
 try {
   status = execFileSync(process.execPath, ["bin/dsh-purge.js", "--status"], {
@@ -124,42 +135,58 @@ if (status.includes(`插件根 / root  ${AI_BASE}`)) ok("宿主根解析正确")
 else bad("宿主根未解析到预期路径（DSH_SURFACE=desktop 生效？）");
 
 // ── 4. 自有补丁状态 ─────────────────────────────────────────────
-console.log("[4] 自有补丁状态");
+console.log("[4] 自有补丁状态");  // 结构
 for (const p of r.ours) {
   const line = status.split("\n").find((l) => l.includes(`[#${p.id}]`));
   if (!line) { bad(`#${p.id} 未出现在状态输出`); continue; }
-  if (/pending|applied|already|drifted/.test(line)) ok(`#${p.id} ${p.name}`);
-  else bad(`#${p.id} 状态异常: ${line.trim()}`);
+  /* 只认 applied / already。
+     `drifted` 的语义就是「锚点烂了」，`pending` 是「还没打上」——
+     以前这里把两者都算通过，和 [5] 的文件级豁免叠加后，
+     一个彻底漂移的补丁可以同时过 [4] 和 [5]（审计 B-2）。 */
+  const state = (line.match(/—\s*(\S+)\s*$/) || [])[1] || "";
+  if (state === "applied" || state === "already") ok(`#${p.id} ${p.name} — ${state}`);
+  else bad(`#${p.id} ${p.name} — ${state || line.trim()}（要求 applied / already，drifted 与 pending 都不算到位）`);
 }
 
 // ── 5. 锚点预演（用 --status 打印的真实路径，不猜 core 导出名）──────
-console.log("[5] 锚点预演命中次数");
+console.log("[5] 锚点预演命中次数");  // 结构
 const fileMap = parseStatusPaths(status);
 for (const p of r.ours) {
   const keys = Array.isArray(p.file) ? p.file : [p.file];
-  const targets = keys.flatMap((k) => fileMap[k] || []);
+  const targets = [...new Set(keys.flatMap((k) => fileMap[k] || []))];
   if (!targets.length) { bad(`#${p.id} 宿主文件键 ${keys.join(",")} 未解析到文件`); continue; }
-  const counts = p.patterns.map((pat) => targets.reduce((n, fp) => n + countOcc(fs.readFileSync(fp, "utf8"), pat), 0));
-  const already = targets.some((fp) => fs.readFileSync(fp, "utf8").includes("[dsh-purge-plus]"));
-  const verdict = already
-    ? "已含本仓库标记"
-    : counts.every((c) => c === 1) ? "全部锚点恰好 1 次" : `命中 ${counts.join("/")} 次`;
-  (already || counts.every((c) => c === 1)) ? ok(`#${p.id} ${targets.length} 文件 · ${verdict}`) : bad(`#${p.id} ${verdict} —— 锚点已漂移`);
+  /* 逐文件判「这条补丁在这个文件上到位没有」。
+     以前是 `targets.some(fp => 文本里有 "[dsh-purge-plus]")` —— 文件级豁免：
+     #207 与 #208 都落在 api-session-controller，其中一条漂移到 0 命中时，
+     另一条留下的标记会让两条一起过（审计 B-1）。现在按补丁自己的 marker 判。 */
+  const rows = [];
+  const broken = [];
+  for (const fp of targets) {
+    const text = fs.readFileSync(fp, "utf8");
+    const marked = (p.markers || []).some((mk) => typeof mk === "string" && mk && text.includes(mk));
+    const counts = p.patterns.map((pat) => countOcc(text, pat));
+    const good = marked || counts.every((c) => c === 1);
+    rows.push(`${path.basename(fp)} ${marked ? "已应用" : "锚点 " + counts.join("/")}`);
+    if (!good) broken.push(`${path.basename(fp)}：marker 不在，锚点命中 ${counts.join("/")}（要求每处恰好 1 次）`);
+  }
+  broken.length === 0
+    ? ok(`#${p.id} ${targets.length} 文件逐文件通过（${rows.join(" · ")}）`)
+    : bad(`#${p.id} ${broken.join("；")}`);
 }
 
 // ── 6. 按 DSH 的解析上下文真正加载插件入口 ────────────────────────
 // 构建目录里没有 node_modules，yaml 之类的直接依赖解析不到。
 // DSH 安装后包位于 <profile>/node_modules/<pkg>/，向上能解析到 profile 的依赖。
 // 这里用软链复现那个上下文，确保 cordis 加载时不会 ERR_MODULE_NOT_FOUND。
-console.log("[6] 插件入口加载（DSH 解析上下文）");
+console.log("[6] 插件入口加载（DSH 解析上下文）");  // 结构
 const PROFILE_NM = process.env.DSH_NODE_MODULES
   || path.join(process.env.HOME || "", ".dsh", "profiles", "desktop", "node_modules");
 if (!fs.existsSync(PROFILE_NM)) {
   bad(`找不到 profile 的 node_modules: ${PROFILE_NM}（设 DSH_NODE_MODULES 覆盖）`);
 } else {
-  const LT = path.join(ROOT, "dist", "loadtest");
-  fs.rmSync(LT, { recursive: true, force: true });
-  fs.mkdirSync(LT, { recursive: true });
+  /* 放临时目录而不是 ROOT/dist：包内模式时 ROOT 就是包根，
+     往 ROOT/dist 里拷 PKG 等于把目录拷进自己的子目录（ERR_FS_CP_EINVAL）。 */
+  const LT = fs.mkdtempSync(path.join(os.tmpdir(), "plus-loadtest-"));
   fs.symlinkSync(PROFILE_NM, path.join(LT, "node_modules"));
   fs.cpSync(PKG, path.join(LT, "package"), { recursive: true });
   const loadProbe = `
@@ -184,8 +211,10 @@ if (!fs.existsSync(PROFILE_NM)) {
 // ── 7. 在线更新通道指向本仓库 ────────────────────────────────────
 // 这条是「面板里点升级能不能用」的直接判据：插件自己去 GitHub 找 release，
 // 找错仓库就会拉到 community 的包，或者找不到资产。
-console.log("[7] 在线更新通道");
-{
+console.log("[7] 在线更新通道");  // 结构
+if (!IN_REPO) {
+  na("在线更新通道要拿 vendor/community 的上游坐标与 dist/ 里的 tgz 对账（仓库侧）");
+} else {
   const repo = resolveRepo();
   const slug = `${repo.owner}/${repo.repo}`;
   const read = (f) => fs.readFileSync(path.join(PKG, f), "utf8");
@@ -278,7 +307,7 @@ console.log("[7] 在线更新通道");
     : bad(`package.json repository = ${pkgJson.repository?.url}`);
 }
 
-console.log("[8] cordis.patch.yml 插件名");
+console.log("[8] cordis.patch.yml 插件名");  // 结构
 {
   const yml = fs.readFileSync(path.join(PKG, "cordis.patch.yml"), "utf8");
   const name = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")).name;
@@ -289,7 +318,7 @@ console.log("[8] cordis.patch.yml 插件名");
   stray === 0 ? ok("无上游包名残留") : bad(`仍有 ${stray} 处上游包名`);
 }
 
-console.log("[9] client.js 浏览器模块名");
+console.log("[9] client.js 浏览器模块名");  // 结构
 {
   const js = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
   const name = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")).name;
@@ -299,7 +328,7 @@ console.log("[9] client.js 浏览器模块名");
   stray === 0 ? ok("无上游包名残留") : bad(`client.js 仍有 ${stray} 处上游包名`);
 }
 
-console.log("[10] client.js 界面版本");
+console.log("[10] client.js 界面版本");  // 回归 test-version-notice.mjs
 {
   const pkg2 = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
   const js = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
@@ -311,9 +340,13 @@ console.log("[10] client.js 界面版本");
     ? bad("页脚仍写死上游版本号")
     : ok("页脚不含上游版本号");
   // 界面版本必须是本包版本；基座版本号不该在界面里留残影。
-  const baseVer = JSON.parse(fs.readFileSync(path.join(ROOT, "vendor/community/package.json"), "utf8")).version;
-  const stale = [...new Set((js.match(new RegExp(baseVer.replace(/\./g, "\\.") + "[0-9.\\-a-z]*", "g")) || []))];
-  stale.length === 0 ? ok(`界面无基座版本 ${baseVer} 残留`) : bad(`界面残留基座版本 ${stale.join(", ")}`);
+  if (!IN_REPO) {
+    na("基座版本残留比对需要 vendor/community 的 package.json（仓库侧）");
+  } else {
+    const baseVer = JSON.parse(fs.readFileSync(path.join(ROOT, "vendor/community/package.json"), "utf8")).version;
+    const stale = [...new Set((js.match(new RegExp(baseVer.replace(/\./g, "\\.") + "[0-9.\\-a-z]*", "g")) || []))];
+    stale.length === 0 ? ok(`界面无基座版本 ${baseVer} 残留`) : bad(`界面残留基座版本 ${stale.join(", ")}`);
+  }
   js.includes(`Plus ${pkg2.version}`) ? ok(`面板徽章 = Plus ${pkg2.version}`) : bad("面板徽章不是本包版本");
   js.includes(`"${pkg2.version}"`) ? ok(`界面版本 = ${pkg2.version}`) : bad(`界面版本不是 ${pkg2.version}`);
   /^0\.1\.\d+$/.test(pkg2.version) ? ok(`版本号方案 0.1.N = ${pkg2.version}`) : bad(`版本号不是 0.1.N：${pkg2.version}`);
@@ -355,7 +388,7 @@ console.log("[10b] 技能页可见性（版本换轨回归）");
   js.includes('"skills.dead"') ? ok("空态文案含失效链接提示") : bad("空态文案缺失效链接提示");
 }
 
-console.log("[11] 演练台「凭据与文件」页");
+console.log("[11] 演练台「凭据与文件」页");  // 回归 test-artifacts-tab.mjs
 {
   const files = ["lib/redteam/client.js", "client.js"];
   for (const f of files) {
@@ -372,7 +405,7 @@ console.log("[11] 演练台「凭据与文件」页");
   hasCred && hasAccess ? ok("credentials / access 两个 op 后端存在") : bad("credentials 或 access 后端缺失");
 }
 
-console.log("[12] P0 静默失败四件");
+console.log("[12] P0 静默失败四件");  // 回归 test-silent-failures.mjs
 {
   const schema = fs.readFileSync(path.join(PKG, "lib/redteam/schema.js"), "utf8");
   const core = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
@@ -425,7 +458,7 @@ console.log("[12] P0 静默失败四件");
   /searchTemplates\(q, limit = 40, offset = 0, category = ''\)/.test(core)
     ? ok("searchTemplates 收 4 个参数（q / limit / offset / category）")
     : bad("searchTemplates 签名仍是 (q, limit)，category 会被静默丢弃");
-  /return \{ dir: dir \|\| null, total: items\.length, cve, byCategory \}/.test(core)
+  /return \{ dir: dir \|\| null, total: items\.length, cve, cve_ids: cveIdSet\.size, byCategory \}/.test(core)
     ? ok("templateStats 返回 byCategory")
     : bad("templateStats 未返回 byCategory（面板分类计数恒为 0）");
   /\.map\(\(\[code, n\]\) => \(\{ code, name: pocCategoryName\(code\), n \}\)\)/.test(core)
@@ -433,7 +466,7 @@ console.log("[12] P0 静默失败四件");
     : bad("byCategory 只给出一种键，面板或工具会拿到 undefined");
 }
 
-console.log("[13] P1 会话绑定层 / P2 会话关系图");
+console.log("[13] P1 会话绑定层 / P2 会话关系图");  // 回归 test-session-binding.mjs, test-silent-failures.mjs, test-p20.mjs
 {
   const core = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
   const tools = fs.readFileSync(path.join(PKG, "lib/redteam/tools.js"), "utf8");
@@ -478,7 +511,7 @@ console.log("[13] P1 会话绑定层 / P2 会话关系图");
     : bad("client.js：缺少会话跟随接线");
 }
 
-console.log("[14] P3 子智能体回报 / 「现在在等谁」");
+console.log("[14] P3 子智能体回报 / 「现在在等谁」");  // 回归 test-attention.mjs
 {
   const core = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
   const schema = fs.readFileSync(path.join(PKG, "lib/redteam/schema.js"), "utf8");
@@ -544,7 +577,7 @@ console.log("[14] P3 子智能体回报 / 「现在在等谁」");
   }
 }
 
-console.log("[15] P4 导航分组 / 二级页签");
+console.log("[15] P4 导航分组 / 二级页签");  // 回归 test-nav-groups.mjs
 {
   /* 两份产物都要有：lib/redteam/client.js 是「全面浏览」新窗口那份，
      client.js 是面板内嵌那份。只改一份会出现「面板里有分组、新窗口里没有」。 */
@@ -578,7 +611,7 @@ console.log("[15] P4 导航分组 / 二级页签");
     : bad("别名表不完整");
 }
 
-console.log("[16] P5 站内全屏");
+console.log("[16] P5 站内全屏");  // 回归 test-fullscreen.mjs
 {
   /* P5 的关键不是「钩子写了」，而是三件事同时成立：
      ① 钩子真的在产物里，且只定义一次
@@ -639,7 +672,7 @@ console.log("[16] P5 站内全屏");
   }
 }
 
-console.log("[17] P7 覆盖度引擎");
+console.log("[17] P7 覆盖度引擎");  // 回归 test-coverage.mjs
 {
   const schema = fs.readFileSync(path.join(PKG, "lib", "redteam", "schema.js"), "utf8");
   const core = fs.readFileSync(path.join(PKG, "lib", "redteam", "store-core.js"), "utf8");
@@ -694,7 +727,7 @@ console.log("[17] P7 覆盖度引擎");
     : bad("队列没有按 scopeOfIp 过滤内外网");
 }
 
-console.log("[18] P6 态势首页");
+console.log("[18] P6 态势首页");  // 回归 test-attention-badge.mjs
 {
   /* 三处必须同时成立，缺一处就是「页签在但点开空白」：
      tabs 表 / TAB_GROUPS / body 分发。组件本体定义一次即可。 */
@@ -727,7 +760,7 @@ console.log("[18] P6 态势首页");
     : bad("首页缺少「有缺口但没人等」的提示");
 }
 
-console.log("[19] P9 清理清单 / P10 资源保鲜");
+console.log("[19] P9 清理清单 / P10 资源保鲜");  // 回归 test-cleanup.mjs, test-p20.mjs
 {
   const schema = fs.readFileSync(path.join(PKG, "lib", "redteam", "schema.js"), "utf8");
   const core = fs.readFileSync(path.join(PKG, "lib", "redteam", "store-core.js"), "utf8");
@@ -792,7 +825,7 @@ console.log("[19] P9 清理清单 / P10 资源保鲜");
     : bad("首页缺资源徽章");
 }
 
-console.log("[20] P8 数据证明 + 四段式报告");
+console.log("[20] P8 数据证明 + 四段式报告");  // 回归 test-report-v2.mjs, test-report-v2-ui.mjs
 {
   const schema = fs.readFileSync(path.join(PKG, "lib", "redteam", "schema.js"), "utf8");
   const core = fs.readFileSync(path.join(PKG, "lib", "redteam", "store-core.js"), "utf8");
@@ -850,7 +883,7 @@ console.log("[20] P8 数据证明 + 四段式报告");
   }
 }
 
-console.log("[21] P11 复合工具入口");
+console.log("[21] P11 复合工具入口");  // 回归 test-composite-tools.mjs
 {
   const core = fs.readFileSync(path.join(PKG, "lib", "redteam", "store-core.js"), "utf8");
   const tools = fs.readFileSync(path.join(PKG, "lib", "redteam", "tools.js"), "utf8");
@@ -884,7 +917,7 @@ console.log("[21] P11 复合工具入口");
     : bad("模板保鲜工具里出现网络调用");
 }
 
-console.log("[22] P12 证据账本 UI");
+console.log("[22] P12 证据账本 UI");  // 回归 test-evidence-ledger.mjs
 {
   const core = fs.readFileSync(path.join(PKG, "lib", "redteam", "store-core.js"), "utf8");
   const tabsDef = fs.readFileSync(path.join(ROOT, "overlay", "snippets", "nav-groups-defs.js"), "utf8");
@@ -920,15 +953,17 @@ console.log("[22] P12 证据账本 UI");
 }
 
 /* ── [23] P20/P21 报告文档视图 · 会话关系图 · 字段级对齐 · 情报刷新 ── */
-console.log("\n[23] P20/P21 报告文档视图 · 会话关系图 · 字段级对齐 · 情报刷新");
+console.log("\n[23] P20/P21 报告文档视图 · 会话关系图 · 字段级对齐 · 情报刷新");  // 回归 test-report-v2-ui.mjs, test-p20.mjs
 {
   const core = fs.readFileSync(path.join(PKG, "lib", "redteam", "store-core.js"), "utf8");
   const schema = fs.readFileSync(path.join(PKG, "lib", "redteam", "schema.js"), "utf8");
 
   /* 23.1 scoreReport 的 layout 分支：两条路径都存在，且 simple 不重算分 */
-  /String\(options\.layout \|\| ''\) === 'simple'/.test(core)
-    ? ok("scoreReport：layout='simple' 分支存在")
-    : bad("scoreReport：缺 layout='simple' 分支");
+  /* [PA-05] 默认必须是 simple：safe 2.0.2 的默认是 simple，而 redteam_score_report
+     三方逐字相同、只传 {limit} —— 默认翻转会让同一个工具在换包后给出另一份报告。 */
+  /String\(options\.layout \|\| 'simple'\) !== 'legacy'/.test(core)
+    ? ok("scoreReport：默认 simple（legacy 需显式 layout:'legacy'）")
+    : bad("scoreReport：默认 layout 不是 simple");
   /report: report,\s*\n\s*markdown: built\.markdown/.test(core)
     ? ok("scoreReport：simple 返回 report + 同一份 markdown")
     : bad("scoreReport：simple 没把 report 带出来");
@@ -1024,11 +1059,12 @@ console.log("\n[23] P20/P21 报告文档视图 · 会话关系图 · 字段级�
     ? ok("addCleanup：去重键含 location（同主机两个马不会被吞掉）")
     : bad("addCleanup：去重键不含 location");
 
-  /* 23.12 审计 R-05：查不出来 ≠ 清干净 */
-  /cleared: queryError === null \? byStatus\.open === 0 : null/.test(core)
+  /* 23.12 审计 R-05：查不出来 ≠ 清干净；R14 起还要「不按筛选算」 */
+  /cleared: queryError === null && openTotal !== null \? openTotal === 0 : null/.test(core)
+    && /SELECT COUNT\(\*\) AS n FROM cleanup_item WHERE status = 'open'/.test(core)
     && /out\.cleared = queryError === null \? out\.open === 0 : null/.test(core)
-    ? ok("cleanup：查询失败时 cleared 是 null（不假装已清干净）")
-    : bad("cleanup：查询失败被当成「已清干净」");
+    ? ok("cleanup：cleared 用整表 open 数（查询失败是 null、只看 done 也不会假报清干净）")
+    : bad("cleanup：cleared 口径不对（查询失败或按筛选算）");
 
   /* 23.13 审计 R-09/R-10：nuclei 临时目录必清 + 跨挂载点兜底 + gzip 魔数 */
   /\} finally \{\n\s*try \{ rmSync\(stage/.test(core)
@@ -1061,10 +1097,14 @@ console.log("\n[23] P20/P21 报告文档视图 · 会话关系图 · 字段级�
     : bad("会话图：点靶标只改前端 state，后端指针没动");
 
   /* 23.16 构建守卫必须与「构建时刻」无关，否则守卫常红等于没有守卫 */
-  const buildSrc = fs.readFileSync(path.join(ROOT, "scripts", "build.mjs"), "utf8");
-  /function stableBytes\(rel, abs\)/.test(buildSrc) && /delete holder\.generatedAt/.test(buildSrc)
-    ? ok("构建摘要剔除 generatedAt（同 revision 重跑不再误报「内容不同」）")
-    : bad("构建摘要含 generatedAt —— 同一内容每次摘要都变，T7 守卫会永远报错");
+  if (!IN_REPO) {
+    na("构建摘要守卫要看 build.mjs 原文（仓库侧）");
+  } else {
+    const buildSrc = fs.readFileSync(path.join(ROOT, "scripts", "build.mjs"), "utf8");
+    /function stableBytes\(rel, abs\)/.test(buildSrc) && /delete holder\.generatedAt/.test(buildSrc)
+      ? ok("构建摘要剔除 generatedAt（同 revision 重跑不再误报「内容不同」）")
+      : bad("构建摘要含 generatedAt —— 同一内容每次摘要都变，T7 守卫会永远报错");
+  }
 
   /0x1f && got\.buf\[1\] === 0x8b/.test(core)
     ? ok("nuclei：先验 gzip 魔数再解压")
@@ -1075,8 +1115,10 @@ console.log("\n[23] P20/P21 报告文档视图 · 会话关系图 · 字段级�
 // 文档（移植判定 / 审计报告 / 发布手册 / 合规清单）是开发期材料。它们含本机绝对
 // 路径与内部推理，不该出现在公开仓库；构建脚本也因此不再把 docs 复制进包。
 // 这三条是**回归守卫**：将来谁把 docs 加回 git 或复制回包，验收立刻红。
-console.log("[24] 维护文档只在本机");
-{
+console.log("[24] 维护文档只在本机");  // 结构
+if (!IN_REPO) {
+  na("「维护文档不进仓库也不进包」要比对仓库的 docs/ 与 .gitignore（仓库侧）");
+} else {
   const localDocs = path.join(ROOT, "docs");
   const localMd = fs.existsSync(localDocs)
     ? fs.readdirSync(localDocs).filter((f) => f.endsWith(".md"))
@@ -1116,7 +1158,7 @@ console.log("[24] 维护文档只在本机");
 // ── 25. 待办角标挂在 shell.overlay，且不自动收口 ────────────────────
 // 角标的价值全在「不在这页也看得见」。挂到页签内部功能测试照样全绿（打开演练台能看见），
 // 只有人在别的页面时才暴露 —— 所以这里断言**挂载点**，不是「组件存在」。
-console.log("[25] 待办角标");
+console.log("[25] 待办角标");  // 回归 test-attention-badge.mjs
 {
   const panel = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
   const rt = fs.readFileSync(path.join(PKG, "lib", "redteam", "client.js"), "utf8");
@@ -1164,8 +1206,10 @@ console.log("[25] 待办角标");
 //      88 + 自有 7 = 95，构建不变式本来就是对的 —— 错的是文本扫描。
 // 所以这里不数源码文本，而是 import 装配产物的补丁表；README 必须出现
 // 同一个数字，加一条编辑/补丁而不改文档就会在这里红。
-console.log("[26] 计数口径（文档 vs 代码复算）");
-{
+console.log("[26] 计数口径（文档 vs 代码复算）");  // 结构
+if (!IN_REPO) {
+  na("计数复算要读 build.mjs 的 SNIPPETS 表与 docs 原文（仓库侧）");
+} else {
   const { buildEdits } = await import("../overlay/edits.mjs");
   const edits = buildEdits(resolveRepo());
   const reqFalse = edits.filter((e) => e.required === false).length;
@@ -1219,6 +1263,21 @@ console.log("[26] 计数口径（文档 vs 代码复算）");
     readmeEn.includes(needle) ? ok(`README.en 含正确数字：${label}`) : bad(`README.en 缺失正确数字：${label}（应含「${needle}」）`);
   }
 
+  // 注释也会说谎：build.mjs 头部写着「179 条（required 176）」，实际 185/182，
+  // 而读注释的人会据此以为改动面比真实的小。注释里的数字同样纳入复算。
+  {
+    const head = buildSrc.slice(0, buildSrc.indexOf("import fs from"));
+    const m = head.match(/锚点编辑：overlay\/edits\.mjs \*\*(\d+) 条\*\*（required (\d+) \/ required:false (\d+)）/);
+    if (!m) bad("build.mjs 头部注释里找不到锚点编辑计数（注释被改成了别的形状，本组无法核对）");
+    else {
+      const [, total, req, reqFalse2] = m.map(Number);
+      const wantReq = edits.length - reqFalse;
+      total === edits.length && req === wantReq && reqFalse2 === reqFalse
+        ? ok(`build.mjs 注释计数与代码一致（${total} = required ${req} + required:false ${reqFalse2}）`)
+        : bad(`build.mjs 注释计数过时：写 ${total}/${req}/${reqFalse2}，实际 ${edits.length}/${wantReq}/${reqFalse}`);
+    }
+  }
+
   /* 只查"某处含正确数字"是不够的 —— 2026-11-23 就是这样漏的：README.md 第 64 行
      写 185（新），第 233/273 行还写 176（旧），存在性断言照样绿。这里改成
      「所有出现处都必须等于实际条数」，任何一处旧数字都算失败。 */
@@ -1240,7 +1299,7 @@ console.log("[26] 计数口径（文档 vs 代码复算）");
 // 与 build §4 的剔除规则同一条：装配包 package.json 里每个 script 引用
 // 的相对路径都必须在装配目录真实存在。build 漏剔或基座将来新增死脚本，
 // 都会在这里红 —— 装到用户机器上「点哪条炸哪条」属于交付事故。
-console.log("[27] 装配包 scripts 路径存在");
+console.log("[27] 装配包 scripts 路径存在");  // 结构
 {
   const pkgJson = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
   const SCRIPT_PATH_RE = /(?<![\w/.-])((?:test|packages|scripts|bin|lib|docs|locale|presets|skills)\/[^\s"']+)/g;
@@ -1257,8 +1316,10 @@ console.log("[27] 装配包 scripts 路径存在");
     : bad(`scripts 引用了不存在的路径：${missingRefs.join(" · ")}`);
 }
 
-console.log("[28] op 契约（两家上游能力面 vs 产物）");
-{
+console.log("[28] op 契约（两家上游能力面 vs 产物）");  // 结构
+if (!IN_REPO) {
+  na("op 契约要读 vendor/ 里两家上游的 store-core（仓库侧）");
+} else {
   // 「覆盖社区版与 safe 版的全部能力」的分母是后端 op，不是 UI：
   // store-core 的 dispatch 是扁平 if 链，UI 只是它的消费者。这一组把分母
   // 钉住 —— 上游新增一条 op 而产物没有，或 UI 写错一个 op 名，都在这里红，
@@ -1288,7 +1349,7 @@ console.log("[28] op 契约（两家上游能力面 vs 产物）");
 // 所以这里既查包内文件，也查引用链：技能文本里点名的工具必须真存在，
 // 移植模块必须被 import，否则就是死代码。
 {
-  console.log("[29] safe 能力层移植");
+  console.log("[29] safe 能力层移植");  // 结构
   const pkgSkills = path.join(PKG, "skills", "redteam");
   const names = fs.existsSync(pkgSkills) ? fs.readdirSync(pkgSkills).filter((f) => f.endsWith(".md")) : [];
   names.length === 40
@@ -1331,7 +1392,7 @@ console.log("[28] op 契约（两家上游能力面 vs 产物）");
 // （二级页签被过滤掉，点不出来），工具加了却指向一个不在包里的构建器
 // （报错文案让人去跑一个不存在的脚本）。
 {
-  console.log("[30] 团队任务板 / CVE 底库");
+  console.log("[30] 团队任务板 / CVE 底库");  // 回归 test-intel-cve-sync.mjs
   const uiSrc = fs.readFileSync(path.join(PKG, "lib/redteam/ui.js"), "utf8");
   const hasFn = /async function handleTeamBoardOp\(ctx, store, request\)/.test(uiSrc);
   const hasRoute = /const teamBoardResult = await handleTeamBoardOp\(ctx, store, request\)/.test(uiSrc);
@@ -1511,7 +1572,7 @@ console.log("[28] op 契约（两家上游能力面 vs 产物）");
 // 本组把自己也算进去：组号必须是 1..N 连续，两份 README 里每一处「N 组只读」
 // 都必须等于这个 N。上一版 README 写着 28 组而实际已有 30 组 —— 存在性断言
 // 抓不到「数字过时」，这里逐处比对。
-console.log("[31] 验收组数口径（文档 vs 自身）");
+console.log("[31] 验收组数口径（文档 vs 自身）");  // 结构
 {
   const selfSrc = fs.readFileSync(path.join(ROOT, "scripts", "verify.mjs"), "utf8");
   const nums = [...selfSrc.matchAll(/console\.log\("(?:\\n)?\[(\d+)\]/g)].map(m => Number(m[1]));
@@ -1531,11 +1592,1001 @@ console.log("[31] 验收组数口径（文档 vs 自身）");
   }
 }
 
+// [32] 文档与产物一致性（README 说的是不是产物里真有的）
+// 上一轮只守住「数字」，守不住「清单」：README 的自有补丁一节列了 201/202/203/205/206
+// 五条，实际有七条（207/208 从未出现在文档里）；页签数写着 11、产物里是 14；
+// 「6 分组导航在路线图」其实早已实现；还引用了三个不在仓库里的文件（RELEASE.md /
+// UPSTREAM.md / package.json）。这一组把这些逐条钉在产物上。
+console.log("[32] 文档与产物一致性");  // 结构
+{
+  const clientSrc = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
+  const tabsAt = clientSrc.indexOf("const tabs = [");
+  const tabsEnd = clientSrc.indexOf("];", tabsAt);
+  const tabIds = tabsAt >= 0 && tabsEnd > tabsAt
+    ? [...clientSrc.slice(tabsAt, tabsEnd).matchAll(/\[\s*"([a-z-]+)"\s*,/g)].map((m) => m[1])
+    : [];
+  const grpAt = clientSrc.indexOf("const TAB_GROUPS = [");
+  /* 不能用 indexOf("]") 找数组结尾 —— 第一个 ] 是 `tabs: ['overview']` 里的。
+     做一次括号配对：从 [ 起数深度，回到 0 才是整个数组。 */
+  let groups = 0;
+  if (grpAt >= 0) {
+    const open = clientSrc.indexOf("[", grpAt);
+    let depth = 0;
+    let end = -1;
+    for (let i = open; i < clientSrc.length; i += 1) {
+      const ch = clientSrc[i];
+      if (ch === "[") depth += 1;
+      else if (ch === "]") { depth -= 1; if (depth === 0) { end = i; break } }
+    }
+    if (end > open) groups = [...clientSrc.slice(open, end).matchAll(/\{\s*key:\s*'/g)].length;
+  }
+  tabIds.length > 0 ? ok(`产物页签 ${tabIds.length} 个（${tabIds.join(" ")}）`) : bad("读不出产物页签表");
+  groups > 0 ? ok(`产物一级分组 ${groups} 个`) : bad("读不出一级分组表");
+
+  const overlayMod = await import(path.join(PKG, "lib", "patches", "overlay.mjs"));
+  const ownIds = (overlayMod.OVERLAY_PATCHES || []).map((p) => p.id);
+
+  for (const [file, lang] of [["README.md", "zh"], ["README.en.md", "en"]]) {
+    const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    const wantTabs = lang === "zh" ? `${tabIds.length} 个页签` : `${tabIds.length} tabs`;
+    const wantGroups = lang === "zh" ? `${groups} 个分组` : `${groups} groups`;
+    text.includes(wantTabs) ? ok(`${file} 页签数 = ${tabIds.length}`) : bad(`${file} 页签数不对（应含「${wantTabs}」）`);
+    text.includes(wantGroups) ? ok(`${file} 分组数 = ${groups}`) : bad(`${file} 分组数不对（应含「${wantGroups}」）`);
+
+    const missingIds = ownIds.filter((id) => !text.includes(`#${id}`) && !text.includes(String(id)));
+    missingIds.length === 0
+      ? ok(`${file} 列全自有补丁 ${ownIds.length} 条（${ownIds.join(",")}）`)
+      : bad(`${file} 漏列自有补丁：${missingIds.map((i) => "#" + i).join(",")}`);
+
+    /* 仓库里不存在的 .md 引用一律算错：README 是给外人看的，指向一个
+       只在本机存在的文件等于给了一个 404。docs/ 已被 .gitignore 排除，
+       所以引用 docs/ 里的文件名同样算错（读者看不到）。
+       例外：随发行物分发的新增文件（overlay/files/**），它们在包里有、在仓库根没有。 */
+    const shipped = new Set();
+    const walk = (dir) => {
+      for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, d.name);
+        if (d.isDirectory()) walk(p);
+        else shipped.add(d.name);
+      }
+    };
+    walk(path.join(ROOT, "overlay", "files"));
+    const refs = [...new Set([...text.matchAll(/([A-Z][A-Z0-9-]{1,30}\.md)/g)].map((m) => m[1]))];
+    const dead = refs.filter((f) => f !== file && !fs.existsSync(path.join(ROOT, f)) && !shipped.has(f));
+    dead.length === 0
+      ? ok(`${file} 引用的文档全部可达（${refs.length} 个）`)
+      : bad(`${file} 引用了不存在的文件：${dead.join("、")}`);
+  }
+
+  /* 验收表：49 组不可能全塞进 README，但必须**说明是节选** ——
+     否则读者会以为表里 8 行就是全部，红了一项还找不到是哪一项。 */
+  for (const [file, needle] of [["README.md", "节选"], ["README.en.md", "excerpt"]]) {
+    const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    text.includes(needle) ? ok(`${file} 验收表标注为节选`) : bad(`${file} 验收表没标注节选（读者会以为只有表里几条）`);
+  }
+
+  /* 表里点名的组号必须真的存在。R18 之前 README 写「全部 35 组」而实际 48 组，
+     没有一条断言管这件事 —— 读者照着表里的编号找，找到的是另一版产物。
+     这里把 README 的验收表与 verify.mjs 的组号集合对齐（双向：表里的必须存在，
+     且表必须是节选而不是复制一遍）。 */
+  const verifySrc = fs.readFileSync(path.join(ROOT, "scripts", "verify.mjs"), "utf8");
+  const groupIds = new Set([...verifySrc.matchAll(/console\.log\("(?:\\n)?\[(\d+)\]/g)].map((mm) => Number(mm[1])));
+  for (const [file, head] of [["README.md", "## 验收"], ["README.en.md", "## Verification"]]) {
+    const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    const at = text.indexOf(head);
+    if (at < 0) { bad(`${file} 找不到验收章节（${head}）`); continue; }
+    const rest = text.slice(at + head.length);
+    const next = rest.search(/\n## /);
+    const sec = next >= 0 ? rest.slice(0, next) : rest;
+    const rows = [...sec.matchAll(/^\|\s*(\d+)\s*\|/gm)].map((mm) => Number(mm[1]));
+    const ghost = rows.filter((n) => !groupIds.has(n));
+    rows.length > 0
+      ? (ghost.length === 0
+        ? ok(`${file} 验收表 ${rows.length} 行组号都真实存在`)
+        : bad(`${file} 验收表点了不存在的组：${ghost.join(",")}`))
+      : bad(`${file} 验收表一行都没解析出来`);
+    rows.length < groupIds.size
+      ? ok(`${file} 验收表是节选（${rows.length} < ${groupIds.size}）`)
+      : bad(`${file} 验收表列了 ${rows.length} 行，已不是节选（总共 ${groupIds.size} 组）`);
+  }
+}
+
+// [33] 回归测试汇总（验收不该只跑 verify 自己）
+// 结构性问题：31 组验收没有一组会跑那 19 个 test-*.mjs。于是「verify 全绿」
+// 和「行为没坏」是两件事 —— 有人把 dispatch 改坏，只要不碰验收断言就照样绿。
+// 全量跑完只要 3 秒，没有理由不跑。
+console.log("[33] 回归测试汇总（scripts/test-*.mjs）");  // 结构
+{
+  const files = fs.readdirSync(path.join(ROOT, "scripts")).filter((n) => /^test-.*\.mjs$/.test(n)).sort();
+  const reds = [];
+  let totalPass = 0;
+  for (const name of files) {
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(process.execPath, [path.join(ROOT, "scripts", name)], {
+        cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 180000,
+      });
+    } catch (e) {
+      code = e.status ?? 1;
+      out = `${e.stdout || ""}${e.stderr || ""}`;
+    }
+    const m = out.match(/(\d+)\s*通过\s*\/\s*(\d+)\s*失败/);
+    if (code !== 0) {
+      const lastFail = out.split("\n").filter((l) => l.includes("✗")).slice(-2).join(" ");
+      reds.push(`${name}（exit ${code}）${lastFail ? " " + lastFail.trim() : ""}`);
+    } else if (!m) {
+      /* exit 0 但没打印汇总行 = 一条断言都没跑。
+         以前这种脚本会被算成全绿（totalPass 只是不增长），
+         等于「把测试删空」也能过验收（审计 B-4）。 */
+      reds.push(`${name}（exit 0 但没打印「N 通过 / M 失败」—— 没有断言不算通过）`);
+    } else {
+      if (Number(m[1]) === 0) reds.push(`${name}（0 条断言 —— 空跑不算通过）`);
+      else totalPass += Number(m[1]);
+    }
+  }
+  reds.length === 0
+    ? ok(`${files.length} 个测试脚本全绿（${totalPass} 条断言）`)
+    : bad(`测试脚本失败 ${reds.length} 个：${reds.join(" · ")}`);
+}
+
+// [34] 运行时门槛（engines 与代码里的内置模块 import 对齐）
+// 上游的 engines 是 `>=18`，但 redteam 层在模块顶层静态 import `node:sqlite`
+// （Node 22.5 才有的内置模块）。声明与代码不一致的后果不是「少个功能」：
+// 在 Node 18/20 上 `import` 阶段就 ERR_UNKNOWN_BUILTIN_MODULE，插件直接加载失败，
+// 而包管理器已经放行了。这里把两者绑在一起 —— 代码用哪个内置模块，声明就得跟到哪。
+console.log("[34] 运行时门槛（engines vs 实际 import）");  // 结构
+{
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
+  const declared = String((pkgJson.engines && pkgJson.engines.node) || "");
+  const m = declared.match(/(\d+)\.(\d+)/);
+  const declaredNum = m ? Number(`${m[1]}.${m[2]}`) : 0;
+
+  const hits = [];
+  const walk = (dir) => {
+    for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) { if (d.name !== "node_modules") walk(p); continue; }
+      if (!/\.(js|mjs|cjs)$/.test(d.name)) continue;
+      const src = fs.readFileSync(p, "utf8");
+      for (const mm of src.matchAll(/(?:from\s*|require\()\s*['"]node:(sqlite|test|sea)['"]/g)) {
+        hits.push({ file: path.relative(PKG, p), mod: mm[1] });
+      }
+    }
+  };
+  walk(path.join(PKG, "lib"));
+  const mods = [...new Set(hits.map((h) => h.mod))];
+  const NEED = { sqlite: 22.5 };
+  const need = Math.max(0, ...mods.map((x) => NEED[x] || 0));
+
+  if (mods.length === 0) {
+    ok("代码未使用需要更高版本的内置模块");
+  } else {
+    ok(`代码使用内置模块 ${mods.map((x) => "node:" + x).join("、")}（${hits.length} 处），要求 Node ≥ ${need}`);
+    declaredNum >= need
+      ? ok(`engines.node = ${declared}（满足 ≥ ${need}）`)
+      : bad(`engines.node = ${declared} 低于代码要求 ${need} —— 在旧 Node 上装下去会在 import 阶段直接崩`);
+  }
+
+  for (const file of ["README.md", "README.en.md"]) {
+    const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    text.includes(`Node ≥ ${need}`)
+      ? ok(`${file} 标注 Node ≥ ${need}`)
+      : bad(`${file} 没标注真实运行时门槛（应含「Node ≥ ${need}」）`);
+  }
+}
+
+console.log("[35] 模块可达性（移植过来但没人 import = 等于没移植）");  // 结构
+{
+  /* 背景：safe 的 13 个模块是「原样移植」，移植完成不等于功能生效 ——
+     只要没有调用方 import，它在包里就是一段死代码，面板上却会显示「已支持」。
+     docs/audit/AUDIT-3WAY-2026-11-25.md §4 就是这么抓出 5 个的。
+     这里的判据：lib 下每个 js/mjs 必须能从入口走到；走不到的必须登记在
+     DEAD_MODULE_ALLOWLIST 里并写明原因 —— 新出现的死模块直接红。 */
+
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8"));
+  const entries = new Set();
+  const addPath = (p) => { if (typeof p === "string" && p.startsWith("./")) entries.add(path.normalize(p)); };
+  const scanObj = (o) => {
+    if (!o) return;
+    if (typeof o === "string") { addPath(o); return; }
+    if (Array.isArray(o)) { o.forEach(scanObj); return; }
+    if (typeof o === "object") for (const v of Object.values(o)) scanObj(v);
+  };
+  scanObj(pkgJson.main); scanObj(pkgJson.exports); scanObj(pkgJson.dsh); scanObj(pkgJson.bin);
+
+  const all = [];
+  const walkLib = (rel) => {
+    for (const d of fs.readdirSync(path.join(PKG, rel), { withFileTypes: true })) {
+      if (d.name === "node_modules") continue;
+      const r = path.join(rel, d.name);
+      if (d.isDirectory()) walkLib(r);
+      else if (/\.(js|mjs)$/.test(d.name)) all.push(r);
+    }
+  };
+  walkLib("lib");
+
+  const IMPORT_RE = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g;
+  const resolveSpec = (from, spec) => {
+    if (!spec.startsWith(".")) return null;
+    const base = path.normalize(path.join(path.dirname(from), spec));
+    for (const cand of [base, base + ".js", base + ".mjs", path.join(base, "index.js")]) {
+      const fp = path.join(PKG, cand);
+      if (fs.existsSync(fp) && fs.statSync(fp).isFile()) return cand;
+    }
+    return null;
+  };
+
+  const seen = new Set();
+  const queue = [...entries].map((e) => path.normalize(e));
+  while (queue.length) {
+    const f = queue.pop();
+    if (seen.has(f) || !fs.existsSync(path.join(PKG, f))) continue;
+    seen.add(f);
+    const src = fs.readFileSync(path.join(PKG, f), "utf8");
+    let m;
+    IMPORT_RE.lastIndex = 0;
+    while ((m = IMPORT_RE.exec(src))) {
+      const r = resolveSpec(f, m[1]);
+      if (r && !seen.has(r)) queue.push(r);
+    }
+  }
+
+  /* 不是「没人 import」而是「入口不是 import」的白名单：浏览器 bundle、子进程 sidecar、CLI。 */
+  const NON_IMPORT_ENTRIES = {
+    "lib/redteam/client.js": "浏览器 bundle，由宿主按包名加载，不经 Node import",
+    "lib/child-process-hide.mjs": "子进程 sidecar（--require 预载）",
+    "lib/official-installer.mjs": "子进程 sidecar（官方安装器）",
+    "lib/reapply-cli.js": "CLI 入口（bin 脚本 spawn）",
+    "lib/restart-desktop.js": "重启器，由 restart 脚本以子进程拉起",
+    "lib/restart-web.js": "重启器，同上",
+    "lib/uninstall-restart.js": "卸载重启器，同上",
+  };
+  /* 已知债务：移植了但还没接线。允许存在，但每次验收都会点名，
+     新增死模块不会被这个白名单兜住 —— 必须写清原因才能进来。
+     2026-11-25 第二轮审计后已清空：orchestrator-clock / team-board 接进了
+     任务板数据面，intel-sync 判明不是冗余（它同步的是 cve.db 整库，
+     不是 KEV/nuclei）并接进了 intelUpdate。见 [36]。 */
+  const DEAD_MODULE_ALLOWLIST = {};
+
+  const unreachable = all.filter((f) => !seen.has(f));
+  const unexpected = unreachable.filter((f) => !(f in NON_IMPORT_ENTRIES) && !(f in DEAD_MODULE_ALLOWLIST));
+  const debt = unreachable.filter((f) => f in DEAD_MODULE_ALLOWLIST);
+
+  ok(`lib 内 ${all.length} 个模块，入口可达 ${all.length - unreachable.length}，非 import 入口 ${unreachable.length - debt.length - unexpected.length}`);
+  unexpected.length === 0
+    ? ok("没有未登记的死模块")
+    : bad(`出现未登记的死模块：${unexpected.join("、")} —— 移植了没人 import 等于没移植`);
+  debt.length === 0
+    ? ok("没有待接线的已知债务")
+    : console.log(`  · 已知债务 ${debt.length} 项（每次验收点名，见 docs/audit/AUDIT-3WAY）：\n` +
+        debt.map((f) => `      - ${f}：${DEAD_MODULE_ALLOWLIST[f]}`).join("\n"));
+}
+
+// [36] 观察时钟 / 任务板合并 / CVE 底库同步的接线
+// 三个模块都是 safe 2.0.2 原样移植。上一轮审计抓出它们「在包里但没人 import」，
+// 这一轮接完线，必须在这里钉住「接上的是对的那条路」：
+//   · stall 判定靠的是 claimedAt + staleMs 两个入参，少一个那条分支就永远走不到；
+//   · cve 同步必须挂在 intelUpdate 上，且 intelStatus 只读状态文件（不联网）。
+console.log("[36] 观察时钟 / 任务板合并 / CVE 底库同步");  // 回归 test-board-clock.mjs
+{
+  const uiSrc = fs.readFileSync(path.join(PKG, "lib/redteam/ui.js"), "utf8");
+  const coreSrc = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
+
+  const wiring = [
+    [uiSrc.includes("await import('./orchestrator-clock.js')"), "任务板数据面 import 观察时钟"],
+    [uiSrc.includes("await import('./team-board.js')"), "任务板数据面 import 合并模块"],
+    [uiSrc.includes("clockMod.sweepStalled(boardTasks, clockCfg, now)"), "每次读任务板推进时钟"],
+    [uiSrc.includes("staleMs: clockCfg.enabled ? clockCfg.minutes * 60000 : 0"), "把 staleMs 传进合并"],
+    [uiSrc.includes("claimedAt: clockMod ? (task) => clockMod.claimedAt(task) : undefined"), "把 claimedAt 传进合并"],
+    [coreSrc.includes("import { intelSyncStatus, syncIntel } from './intel-sync.js'"), "store-core import 底库同步"],
+    [coreSrc.includes("cve_sync: intelSyncStatus(this.root)"), "intelStatus 报 cve_sync（只读状态文件）"],
+    [coreSrc.includes("['kev', 'nuclei', 'cve']"), "intelUpdate 的 all 包含 cve"],
+    [coreSrc.includes("await this.#updateCveDb(options)"), "intelUpdate 分发到 #updateCveDb"],
+  ];
+  const missingWiring = wiring.filter(([okFlag]) => !okFlag).map(([, why]) => why);
+  missingWiring.length === 0
+    ? ok(`接线点 ${wiring.length}/${wiring.length} 就位（时钟 / 合并 / 底库同步）`)
+    : bad(`接线缺失：${missingWiring.join("、")}`);
+
+  /* intelStatus 的定位是「只读探针，永不联网」。cve_sync 只能是本地状态读取：
+     一旦有人在里面加了 fetch/网络调用，「看一眼状态」就变成了出口动作。 */
+  /* 按大括号配平取方法体（见文件末尾 bodyOf）：不能靠「到下一个方法名」切片 ——
+     P21 的 intel-net 块正好插在 intelStatus 与 intelRefresh 之间，
+     那样切出来的范围会把真实的下载代码算进来，误报成「探针联网」。 */
+  const statusBlock = bodyOf(coreSrc, "intelStatus() {");
+  const netInProbe = /\bfetch\(|https?\.(?:get|request)\(|syncIntel\(|fetchIntelManifest\(/.test(statusBlock);
+  netInProbe
+    ? bad("intelStatus 里出现了网络调用 —— 只读探针不该有出口动作")
+    : ok("intelStatus 仍然只读（没有 fetch / syncIntel / http 请求）");
+
+  /* 两个测试脚本必须在，且必须在 [33] 的 glob 里被跑到。 */
+  const t1 = path.join(ROOT, "scripts", "test-board-clock.mjs");
+  const t2 = path.join(ROOT, "scripts", "test-intel-cve-sync.mjs");
+  [t1, t2].every((f) => fs.existsSync(f))
+    ? ok("两项接线各有独立回归脚本（test-board-clock / test-intel-cve-sync）")
+    : bad(`接线测试脚本缺失：${[t1, t2].filter((f) => !fs.existsSync(f)).map((f) => path.basename(f)).join("、")}`);
+}
+
+// [37] 代理池子系统（12 个 op）
+// safe 2.0.2 的代理池只有前端：12 个 op 在它的服务端 dispatch 里一条都不存在，
+// 调用只会得到 unknown op。本包是从零实现的，所以这里要把我们自己的契约钉死：
+//   · 12 个 op 都要有分发（只写方法不接 op = 功能不存在）；
+//   · 解析模块必须是纯函数（不碰 net/fs），否则单测跑不动、也没法在浏览器侧复用；
+//   · 对外形状不许带 secret —— 口令只留在本机 pool.json；
+//   · 12 个 op 都要登记在 op-ledger（[28] 的 C 项会逐个核对，这里点名一次）。
+console.log("[37] 代理池子系统（12 个 op）");  // 回归 test-proxy-pool.mjs
+{
+  const coreSrc = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
+  const toolSrc = fs.readFileSync(path.join(PKG, "lib/redteam/tools.js"), "utf8");
+  const PROXY_OPS = [
+    "proxyPoolGet", "proxyPoolSave", "proxyProfileSave", "proxyProfileDelete", "proxyProfilesDelete",
+    "proxyPoolImport", "proxyConfigImport", "proxyProfileTest", "proxyPoolTest",
+    "proxyProfileConnect", "proxyPoolConnect", "proxyPoolDisconnect",
+  ];
+  const noBranch = PROXY_OPS.filter((op) => !new RegExp(`req\\.op === '${op}'|op === '${op}'`).test(coreSrc));
+  noBranch.length === 0
+    ? ok(`12 个代理 op 全部有分发`)
+    : bad(`代理 op 缺分发：${noBranch.join("、")}`);
+
+  const ledger = JSON.parse(fs.readFileSync(path.join(ROOT, "overlay", "op-ledger.json"), "utf8"));
+  const noLedger = PROXY_OPS.filter((op) => !ledger.ops || !ledger.ops[op]);
+  noLedger.length === 0
+    ? ok("12 个代理 op 全部登记在 op-ledger")
+    : bad(`代理 op 未登记：${noLedger.join("、")}`);
+
+  /* 解析模块必须是纯函数：一旦 import 了 net/fs，单测就得起真网络，
+     而这块最容易出错的恰恰是字符串解析。 */
+  const parsePath = path.join(PKG, "lib/redteam/proxy-parse.js");
+  if (!fs.existsSync(parsePath)) {
+    bad("缺少 lib/redteam/proxy-parse.js（代理配置解析）");
+  } else {
+    const parseSrc = fs.readFileSync(parsePath, "utf8");
+    const impure = /from\s+'node:(net|fs|http|https|child_process|dns)'/.test(parseSrc);
+    impure ? bad("proxy-parse.js 引入了 IO 模块，应当是纯函数") : ok("proxy-parse.js 是纯函数（无 net/fs/http import）");
+    const exportsParse = /export function parseProxyConfig\s*\(/.test(parseSrc);
+    exportsParse ? ok("导出 parseProxyConfig") : bad("proxy-parse.js 没导出 parseProxyConfig");
+  }
+
+  /* 对外形状不许带口令。判据是 #proxyPublic 的函数体里不能出现 `secret:` 这个键。 */
+  const publicBody = bodyOf(coreSrc, "#proxyPublic(profile) {");
+  publicBody === ""
+    ? bad("找不到 #proxyPublic（对外节点形状）")
+    : (/\bsecret\s*:/.test(publicBody)
+      ? bad("#proxyPublic 里出现了 secret 字段 —— 口令不该回传给调用方")
+      : ok("#proxyPublic 不含 secret（只给 passwordSet）"));
+
+  /* connect 的纪律：探测失败必须先 throw，不能先写 activeId。 */
+  const connectBody = bodyOf(coreSrc, "async proxyProfileConnect(id, options = {}) {");
+  const throwAt = connectBody.indexOf("没有切换生效节点");
+  const setAt = connectBody.indexOf("state.activeId = key");
+  (throwAt > 0 && setAt > throwAt)
+    ? ok("connect 先探测、失败即抛，之后才写 activeId（顺序正确）")
+    : bad("connect 的「失败不切换」顺序不对：先写了 activeId 或缺少失败分支");
+
+  toolSrc.includes("name: 'redteam_proxy_pool'")
+    ? ok("redteam_proxy_pool 已注册")
+    : bad("redteam_proxy_pool 未注册");
+
+  const testFile = path.join(ROOT, "scripts", "test-proxy-pool.mjs");
+  fs.existsSync(testFile) ? ok("代理池有独立回归脚本（test-proxy-pool.mjs）") : bad("缺少 test-proxy-pool.mjs");
+}
+
+// [38] 沙箱跟随 + 区域出网闸
+// 两项都来自 safe 2.0.2，但**都不是原样无条件装**，所以这里钉的是「边界」而不是「有没有」：
+//   · sandbox-follow 只搬 P3/P4。P1/P2 在本包被源码补丁 #9 覆盖（decide() 直接返回
+//     allowed-once，waterfall 不会被调用），装上去就是一段永远不执行的代码；
+//   · net-scope 的闸默认关闭，且**不能**覆盖基座的 lib/net-scope.js ——
+//     基座 identity.js / index.js 依赖它的 ownServerNote 与读写函数。
+console.log("[38] 沙箱跟随 / 区域出网闸");  // 回归 test-sandbox-net.mjs
+{
+  const followPath = path.join(PKG, "lib/sandbox-follow.js");
+  const gatePath = path.join(PKG, "lib/net-scope-gate.js");
+  const basePath = path.join(PKG, "lib/net-scope.js");
+  const capPath = path.join(PKG, "lib/plus-capabilities.js");
+
+  if (!fs.existsSync(followPath)) {
+    bad("缺少 lib/sandbox-follow.js（沙箱模式跟随）");
+  } else {
+    const src = fs.readFileSync(followPath, "utf8");
+    (/export function installSandboxFollow\s*\(/.test(src) ? ok : bad)("sandbox-follow 导出 installSandboxFollow");
+    (/WIDE_SANDBOX_MODE = "danger-full-access"/.test(src) ? ok : bad)("宽档常量是 danger-full-access");
+    /* 关键：不许挂 approval/* —— 补丁 #9 已经让 decide() 直接返回，那层永远不执行。 */
+    (/ctx\.on\(\s*["']approval\//.test(src)
+      ? bad("sandbox-follow 注册了 approval/* 监听 —— 与补丁 #9 重复，且永远不会执行")
+      : ok("sandbox-follow 不碰 approval/*（由补丁 #9 负责）"));
+  }
+
+  if (!fs.existsSync(gatePath)) {
+    bad("缺少 lib/net-scope-gate.js（区域出网闸）");
+  } else {
+    const src = fs.readFileSync(gatePath, "utf8");
+    (/export function installRegionGate\s*\(/.test(src) ? ok : bad)("net-scope-gate 导出 installRegionGate");
+    (/export (?:async )?function taskTargetHit\s*\(/.test(src) ? ok : bad)("导出 taskTargetHit（数据层可用）");
+  }
+
+  /* 基座文件必须原样：被覆盖会让 identity.js 的 ownServerNote import 直接失败。 */
+  if (!fs.existsSync(basePath)) {
+    bad("基座 lib/net-scope.js 不见了");
+  } else {
+    const base = fs.readFileSync(basePath, "utf8");
+    (/export function ownServerNote\s*\(/.test(base) ? ok : bad)("基座 net-scope.js 仍导出 ownServerNote（identity.js 依赖）");
+    (/export function installRegionGate\s*\(/.test(base)
+      ? bad("闸被混进了基座 net-scope.js —— 会覆盖掉 ownServerNote")
+      : ok("闸没有混进基座文件"));
+  }
+
+  if (!fs.existsSync(capPath)) {
+    bad("缺少 lib/plus-capabilities.js");
+  } else {
+    const cap = fs.readFileSync(capPath, "utf8");
+    (cap.includes("installSandboxFollow") ? ok : bad)("能力层装了 sandbox-follow");
+    /* 默认关闭的判据：安装调用必须包在 wantGate 条件里，而不是无条件调用。 */
+    const gated = /const wantGate = [\s\S]{0,200}if \(wantGate\) \{[\s\S]{0,200}installRegionGate\(ctx\)/.test(cap);
+    gated ? ok("区域闸默认关闭（只有 wantGate 为真才 installRegionGate）")
+      : bad("区域闸看起来被无条件安装 —— 上游是无条件装的，本包必须默认关闭");
+  }
+
+  const testFile = path.join(ROOT, "scripts", "test-sandbox-net.mjs");
+  fs.existsSync(testFile) ? ok("两项各有独立回归脚本（test-sandbox-net.mjs）") : bad("缺少 test-sandbox-net.mjs");
+}
+
+// [39] 预设自愈（宿主升级后红队预设不能半失效）
+// 这一块的失败形态最隐蔽：预设「还在」，但里面某一行已经不被新宿主接受，
+// 结果是整个模式下拉被抽空或 registered-broken —— 界面上只表现为「没有红队模式」。
+// 原先 apply 在预设已存在时直接 kept，自愈代码存在但永远走不到，所以这里查三件事：
+//   ① 捷径没了（apply 无条件调 installPreset 且传 ctx）；
+//   ② 六段修复都在（缺一段就等于那一类失效不会自愈）；
+//   ③ 修的是**本包**的包名，不是 community 的。
+console.log("[39] 预设自愈");  // 回归 test-preset-repair.mjs
+{
+  const idxPath = path.join(PKG, "lib/redteam/index.js");
+  if (!fs.existsSync(idxPath)) {
+    bad("缺少 lib/redteam/index.js");
+  } else {
+    const src = fs.readFileSync(idxPath, "utf8");
+
+    (!/const exists = existsSync\(join\(dir, 'agent\.cordis\.yml'\)\)/.test(src)
+      ? ok : bad)("apply 里没有「预设已存在就 kept」的捷径");
+    (/result = installPreset\(\{ force: process\.env\.REDTEAM_PRESET_REFRESH === '1', ctx,/.test(src)
+      ? ok : bad)("apply 无条件调用 installPreset 并传 ctx（组合修复要读 ptcRuntime）");
+
+    const segments = [
+      ["stripDeprecatedToolFilter", "剥离 0.2.1 废弃的 toolFilter"],
+      ["disableSubagentModelSelection", "子代理锁成父模型"],
+      ["repairComposition", "按宿主实际安装的包开关 workflow 行"],
+      ["insertScheduleRow", "补 tool-schedule 行"],
+      ["insertTeamBoardGuidance", "补共享任务板纪律"],
+      ["fixStaleWaitGuidance", "修正 wait_agent 等待说明"],
+      ["disableUnavailableListAgents", "宿主没有 list-agents 子路径时关掉那行"],
+    ];
+    const missing = segments.filter(([fn]) => !new RegExp(`function ${fn}\\s*\\(`).test(src));
+    missing.length === 0
+      ? ok(`六段修复 + list-agents 判定全部就位（${segments.length} 个）`)
+      : bad(`预设自愈缺函数：${missing.map(([fn]) => fn).join("、")}`);
+
+    /* 两版 toolFilter 剥离不能并存：基座那版会留下 allow:，且让 safe 那版永远看不到键。 */
+    (/function repairToolFilter\(text\) \{\s*return stripDeprecatedToolFilter\(text\)/.test(src)
+      ? ok : bad)("repairToolFilter 统一委托给 stripDeprecatedToolFilter（不再有两套跳过规则）");
+
+    /* 工具包名必须是本包坐标：写 community 的话老用户升级后 tools 行解析不到。 */
+    const legacyToolsName = /'dsh-purge-community\/redteam\/tools'/.test(src);
+    legacyToolsName ? bad("工具包名还映射到 dsh-purge-community/redteam/tools（本包里解析不到）")
+      : ok("工具包名映射到本包坐标（没有 community 残留）");
+
+    const testFile = path.join(ROOT, "scripts", "test-preset-repair.mjs");
+    fs.existsSync(testFile) ? ok("有独立回归脚本（test-preset-repair.mjs）") : bad("缺少 test-preset-repair.mjs");
+  }
+}
+
+// [40] 数据目录铺底（bootstrap-runtime）
+// 这块的风险与别处相反：不是「没接线」，而是「接得太狠」——
+// 上游在 apply 里 download:true + background，启动就可能在后台拉 100MB+ 模板并刷 KEV。
+// 本包只接本地那半（知识库 DDL / pocs / toolkit / 平台配置），下载必须显式触发。
+// 所以这里既查「在不在」，也查「启动路径里不许有 download:true」。
+console.log("[40] 数据目录铺底");  // 回归 test-runtime-ensure.mjs
+{
+  const brPath = path.join(PKG, "lib/redteam/bootstrap-runtime.js");
+  if (!fs.existsSync(brPath)) {
+    bad("缺少 lib/redteam/bootstrap-runtime.js");
+  } else {
+    const src = fs.readFileSync(brPath, "utf8");
+    (/export async function ensureRedteamRuntime\s*\(/.test(src) ? ok : bad)("导出 ensureRedteamRuntime");
+    (/export function templatesStatus\s*\(/.test(src) ? ok : bad)("导出 templatesStatus");
+    /* 三种下载协议都在：只剩一种时，镜像挂了就没退路。 */
+    const protos = ["GIT_URLS", "TAR_URLS", "ZIP_URLS"].filter((n) => new RegExp(`const ${n} = \\[`).test(src));
+    const protosOk = protos.length === 3;
+    protosOk ? ok("模板下载保留了 git / tar / zip 三种协议（含镜像回退）")
+      : bad(`模板下载协议缺：${["GIT_URLS", "TAR_URLS", "ZIP_URLS"].filter((n) => !protos.includes(n)).join("、")}`);
+  }
+
+  const coreSrc = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
+  (/req\.op === 'runtimeEnsure'/.test(coreSrc) ? ok : bad)("dispatchAsync 有 runtimeEnsure 分支");
+  const ledger = JSON.parse(fs.readFileSync(path.join(ROOT, "overlay", "op-ledger.json"), "utf8"));
+  (ledger.ops && ledger.ops.runtimeEnsure ? ok : bad)("runtimeEnsure 已登记在 op-ledger");
+
+  const cap = fs.readFileSync(path.join(PKG, "lib/plus-capabilities.js"), "utf8");
+  (/ensureRedteamRuntime\(\{ download: false \}\)/.test(cap)
+    ? ok : bad)("启动时只做本地那半（download:false）");
+  (/ensureRedteamRuntime\(\{ download: true/.test(cap)
+    ? bad("启动路径里出现了 download:true —— 启动不该有不可见的出口动作")
+    : ok("启动路径里没有 download:true"));
+
+  const toolSrc = fs.readFileSync(path.join(PKG, "lib/redteam/tools.js"), "utf8");
+  (/action === 'runtime'/.test(toolSrc) ? ok : bad)("redteam_intel 支持 action=runtime");
+
+  const testFile = path.join(ROOT, "scripts", "test-runtime-ensure.mjs");
+  fs.existsSync(testFile) ? ok("有独立回归脚本（test-runtime-ensure.mjs）") : bad("缺少 test-runtime-ensure.mjs");
+}
+
+// [41] 尾部锚点 + mnemon 开关
+// 两项都在注入层，错了不会报错只会让行为悄悄变：
+//   · 锚点注册两份 → 尾部出现两段互不相同的规则块（基座已经占了 order 10150）；
+//   · 子会话锚点位置错了 → 排在宿主 delegation 之前，对消不掉那句「会被自动拒绝」；
+//   · mnemon 开关没人读 → 用户打开开关发现记忆段还是被摘掉。
+console.log("[41] 尾部锚点 / mnemon 开关");  // 回归 test-anchor-mnemon.mjs
+{
+  const anchorPath = path.join(PKG, "lib/anchor.js");
+  if (!fs.existsSync(anchorPath)) {
+    bad("缺少 lib/anchor.js（尾部锚点）");
+  } else {
+    const src = fs.readFileSync(anchorPath, "utf8");
+    (/export function registerAnchor\s*\(/.test(src) ? ok : bad)("导出 registerAnchor");
+    (/export function anchorTextFor\s*\(/.test(src) ? ok : bad)("导出 anchorTextFor");
+    const nameOk = /dsh-purge-plus:anchor/.test(src) && /dsh-purge-plus:child-anchor/.test(src);
+    nameOk ? ok("锚点名带本包前缀（不会和上游撞名）") : bad("锚点名没有本包前缀");
+    const noLegacy = !/dsh-purge-safe:/.test(src);
+    noLegacy ? ok("没有上游前缀残留") : bad("锚点名里还有 dsh-purge-safe 前缀");
+    /* 子会话 context 必须排在宿主 delegation(120) 之后、且 required。 */
+    const childOrder = Number((src.match(/export const CHILD_ORDER = (\d+)/) || [])[1]);
+    childOrder > 120 ? ok(`子锚点 order=${childOrder}（排在宿主 delegation 120 之后）`) : bad(`子锚点 order=${childOrder}，太靠前`);
+    (/required: true/.test(src) ? ok : bad)("子锚点标了 required（rc5 的 refreshContext 才不会 suppress 掉它）");
+    /* 默认只装子会话那条：section 注册必须受 anchorMode 控制。 */
+    (/anchorMode !== "child"/.test(src) ? ok : bad)("section 注册受 anchorMode 控制（默认只装子会话那条）");
+  }
+
+  const mnemonPath = path.join(PKG, "lib/mnemon-settings.js");
+  if (!fs.existsSync(mnemonPath)) {
+    bad("缺少 lib/mnemon-settings.js（mnemon 开关）");
+  } else {
+    const src = fs.readFileSync(mnemonPath, "utf8");
+    (/path\.join\(dshHome, "dsh-purge-plus", SETTINGS_FILE\)/.test(src)
+      ? ok : bad)("设置落 $DSH_HOME/dsh-purge-plus/mnemon.json（不是上游目录）");
+    (/export function loadMnemonSettings\s*\(/.test(src) && /export function saveMnemonSettings\s*\(/.test(src)
+      ? ok : bad)("读写两个入口都在");
+  }
+
+  const idSrc = fs.readFileSync(path.join(PKG, "lib/identity.js"), "utf8");
+  (/import \{ loadMnemonSettings \} from "\.\/mnemon-settings\.js"/.test(idSrc)
+    ? ok : bad)("identity 真的读这个开关");
+  const uses = (idSrc.match(/mnemonKeep === true \? false :/g) || []).length;
+  uses === 2 ? ok("两处 dropMnemon 都走同一个开关") : bad(`dropMnemon 只有 ${uses} 处走开关（应为 2）`);
+  (/export function isChildAgentContext\s*\(/.test(idSrc) ? ok : bad)("identity 导出 isChildAgentContext（锚点要用）");
+
+  const cap = fs.readFileSync(path.join(PKG, "lib/plus-capabilities.js"), "utf8");
+  (/registerAnchor\(ctx, \{/.test(cap) ? ok : bad)("能力层注册了锚点");
+  (/anchorMode: cfg\.anchorSection === true \? "both" : "child"/.test(cap)
+    ? ok : bad)("默认只装子会话那条（anchorSection 才两段都装）");
+
+  const ledger = JSON.parse(fs.readFileSync(path.join(ROOT, "overlay", "op-ledger.json"), "utf8"));
+  (ledger.ops && ledger.ops.mnemonSettings ? ok : bad)("mnemonSettings 已登记在 op-ledger");
+
+  const testFile = path.join(ROOT, "scripts", "test-anchor-mnemon.mjs");
+  fs.existsSync(testFile) ? ok("有独立回归脚本（test-anchor-mnemon.mjs）") : bad("缺少 test-anchor-mnemon.mjs");
+}
+
+// [42] 原件备份 / 自愈（「保险库」的等价实现）
+// safe 的 core.js 有一整套 vault（ensureOfficialSnapshot / writeVaultMeta / listVaultEntries），
+// 本包基座在 lib/core.js 里已经有等价的一套：backupAll 建 .dshpurge.bak、
+// restoreMissingOriginalsFromBak 还原、refreshStaleBaksForUpgrade 跟宿主升级刷新、
+// applyPatches 前做 profile 级快照。所以**不移植 vault** —— 两套并存只会互相盖。
+// 这条门禁的职责：证明等价机制真的在，并且没有第二套被偷偷加进来。
+console.log("[42] 原件备份 / 自愈");  // 回归 test-vault-equivalence.mjs
+{
+  const coreSrc = fs.readFileSync(path.join(PKG, "lib", "core.js"), "utf8");
+  const bakOk = /const BAK_SUFFIX = "\.dshpurge\.bak"/.test(coreSrc);
+  bakOk ? ok("备份后缀 .dshpurge.bak") : bad("找不到 .dshpurge.bak 备份后缀");
+  const chain = [
+    ["export async function backupAll(", "backupAll（建备份）"],
+    ["export function restoreMissingOriginalsFromBak(", "restoreMissingOriginalsFromBak（还原）"],
+    ["export function refreshStaleBaksForUpgrade(", "refreshStaleBaksForUpgrade（升级后刷新）"],
+    ["collapseDuplicateLegacyApplyPath", "重复声明折叠（自愈）"],
+  ];
+  const missing = chain.filter(([needle]) => !coreSrc.includes(needle));
+  missing.length === 0
+    ? ok(`等价机制 ${chain.length}/${chain.length} 就位`)
+    : bad(`等价机制缺：${missing.map(([, why]) => why).join("、")}`);
+
+  /* 备份失败必须中止写入：没有备份就改宿主是不可接受的。 */
+  (/Host backup failed[\s\S]{0,80}patch writes cancelled/.test(coreSrc)
+    ? ok : bad)("备份失败时中止写入");
+  /* 还原必须拒绝空备份/符号链接，否则「还原」会把原文件写成空。 */
+  const restoreSrc = fs.readFileSync(path.join(PKG, "lib", "restore-backup.js"), "utf8");
+  (/Invalid backup \(empty or non-regular\)/.test(restoreSrc) ? ok : bad)("空备份被拒绝");
+  (/Refusing to restore through symbolic link/.test(restoreSrc) ? ok : bad)("符号链接目标被拒绝");
+
+  /* 反向：不许出现第二套 vault。 */
+  const SAFE_VAULT = ["ensureOfficialSnapshot", "writeVaultMeta", "listVaultEntries"];
+  const hits = SAFE_VAULT.filter((sym) => new RegExp(`function ${sym}\\b`).test(coreSrc));
+  hits.length === 0 ? ok("没有第二套 vault 并存") : bad(`core.js 里出现了 safe 的 vault 实现：${hits.join("、")}`);
+
+  const testFile = path.join(ROOT, "scripts", "test-vault-equivalence.mjs");
+  fs.existsSync(testFile) ? ok("有独立回归脚本（test-vault-equivalence.mjs）") : bad("缺少 test-vault-equivalence.mjs");
+}
+
+// [43] 皮肤层（safe 的 token 链）
+// 16 个 CSS 里只移植了 3 个：ui-theme → workspace-skin → unified-components 是一条
+// 完整的 token 链（--ui-* → --rt-* → 组件），而且作用域就是 .rt-dock / .rt-full，
+// 正是本包演练台窗口的根类。其余 13 个页面皮肤逐类比对后命中率只有 6%–30%，搬过来是整片零命中。
+// 这条门禁查三件事：注入到位、顺序对、不许有全局泄漏（body/html/* 那种）。
+console.log("[43] 皮肤层（token 链）");  // 结构
+{
+  const skinPath = path.join(ROOT, "overlay", "snippets", "rt-skin.css");
+  if (!fs.existsSync(skinPath)) {
+    bad("缺少 overlay/snippets/rt-skin.css");
+  } else {
+    const skin = fs.readFileSync(skinPath, "utf8");
+    const depth = (() => { let d = 0; for (const c of skin) { if (c === "{") d += 1; else if (c === "}") d -= 1; } return d; })();
+    depth === 0 ? ok("括号平衡") : bad(`括号不平衡（depth=${depth}）`);
+    (skin.includes("--ui-canvas:") ? ok : bad)("含 ui-theme 的 --ui-* 调色板");
+    (skin.includes("--rt-border:var(--ui-line)") ? ok : bad)("含 workspace-skin 的 --ui-* → --rt-* 映射");
+    (skin.includes(":is(.rt-dock, .rt-full)") ? ok : bad)("组件规则挂在 .rt-dock / .rt-full 作用域下");
+
+    /* 顺序：token 定义必须在消费之前，否则组件拿到的是未定义变量。 */
+    const uiAt = skin.indexOf("--ui-canvas:");
+    const rtAt = skin.indexOf("--rt-border:var(--ui-line)");
+    const compAt = skin.indexOf(":is(.rt-dock, .rt-full) :is(.rt-card");
+    (uiAt >= 0 && rtAt > uiAt && compAt > rtAt)
+      ? ok("顺序正确：--ui-* → --rt-* → 组件规则")
+      : bad(`token 链顺序不对（ui=${uiAt} rt=${rtAt} 组件=${compAt}）`);
+
+    /* 全局泄漏：不许出现裸 body / html / * 规则，也不许 @import 外部资源。 */
+    const globalRule = /(^|\n)\s*(body|html|\*)\s*[,{]/.test(skin);
+    globalRule ? bad("皮肤层里有全局规则（body/html/*）—— 会改到宿主自己的界面") : ok("没有全局规则（不改宿主界面）");
+    (/@import|url\(/.test(skin) ? bad : ok)("没有 @import / url()（不拉外部资源）");
+
+    /* 两份产物都要有：面板内嵌版与独立窗口版。 */
+    for (const rel of ["lib/redteam/client.js", "client.js"]) {
+      const src = fs.readFileSync(path.join(PKG, rel), "utf8");
+      src.includes("--ui-canvas:") && src.includes("--rt-border:var(--ui-line)")
+        ? ok(`${rel} 已注入皮肤层`)
+        : bad(`${rel} 缺皮肤层`);
+    }
+  }
+}
+
+// [44] 主题开关（dusk / white / system）
+// 皮肤层装上之后 data-theme 才真的有消费者；这条门禁钉的是**作用范围**：
+// 属性只能写在 .rt-dock / .rt-full 上，不许写 <html> / <body> ——
+// 插件替用户决定整个宿主的明暗是越界。
+console.log("[44] 主题开关");  // 回归 test-theme-toggle.mjs
+{
+  const snipPath = path.join(ROOT, "overlay", "snippets", "theme-toggle.js");
+  if (!fs.existsSync(snipPath)) {
+    bad("缺少 overlay/snippets/theme-toggle.js");
+  } else {
+    const src = fs.readFileSync(snipPath, "utf8");
+    (src.includes("'dusk'") && src.includes("'white'") && src.includes("'system'") ? ok : bad)("三档齐全（dusk / white / system）");
+    const scopeOk = /CONTAINERS = '\.rt-dock,\.rt-full'/.test(src);
+    scopeOk ? ok("只作用于 .rt-dock / .rt-full") : bad("容器选择器不对");
+    const leaks = /documentElement\.setAttribute\('data-theme'/.test(src) || /body\.setAttribute\('data-theme'/.test(src);
+    leaks ? bad("片段里往 html/body 写了 data-theme —— 会改到宿主自己的界面") : ok("不往 html/body 写 data-theme");
+    (src.includes("dsh-purge-plus:ui-theme") ? ok : bad)("存储键带本包前缀");
+    /* 容器不在时不许挂按钮：否则面板里会出现一个悬空胶囊。 */
+    /* 查**注入后的产物**，不是片段原文：片段在、但没被注入时，
+       查原文一样绿（审计 B-11）。 */
+    {
+      const guard = "if (containers().length === 0) return false;";
+      const bundles = ["lib/redteam/client.js", "client.js"].filter((rel) => {
+        try { return fs.readFileSync(path.join(PKG, rel), "utf8").includes(guard); } catch { return false; }
+      });
+      bundles.length === 2
+        ? ok("容器不存在时不挂按钮（两份产物里都有这条守卫）")
+        : bad(`容器守卫只出现在 ${bundles.length}/2 份产物里：${bundles.join(",") || "都没有"}`);
+    }
+
+    for (const rel of ["lib/redteam/client.js", "client.js"]) {
+      const bundle = fs.readFileSync(path.join(PKG, rel), "utf8");
+      bundle.includes("dshpp-theme-pill") ? ok(`${rel} 已注入主题开关`) : bad(`${rel} 缺主题开关`);
+    }
+  }
+  const testFile = path.join(ROOT, "scripts", "test-theme-toggle.mjs");
+  fs.existsSync(testFile) ? ok("有独立回归脚本（test-theme-toggle.mjs）") : bad("缺少 test-theme-toggle.mjs");
+}
+
+// [45] 验收脚本随包分发（「能不能对已安装产物复跑」）
+// 以前 `plus.dshCompat.evidenceInRepo: false` 是实话：发布包里一个 test-*.mjs 都没有，
+// 兼容性声明在产物里没有任何可复现证据（审计 B-5）。
+// 这条门禁查四件事：数量对得上、片段 fixture 在、**真的在包内跑得起来**、
+// 以及验收/回归点名要用的脚本没有漏在包外（漏了就等于只在仓库能自证）。
+console.log("[45] 验收脚本随包分发");  // 结构
+{
+  const repoTests = fs.readdirSync(path.join(ROOT, "scripts")).filter((n) => /^test-.*\.mjs$/.test(n));
+  const pkgTests = fs.readdirSync(path.join(PKG, "scripts")).filter((n) => /^test-.*\.mjs$/.test(n));
+  if (ROOT === PKG) {
+    /* 包内模式没有仓库可比：只断言「有测试、且不是空壳」。 */
+    pkgTests.length > 0 ? ok(`包内 ${pkgTests.length} 个 test-*.mjs（包内模式：无仓库可比）`) : bad("包内一个 test-*.mjs 都没有");
+  } else {
+    repoTests.length === pkgTests.length
+      ? ok(`包内 ${pkgTests.length} 个 test-*.mjs（与仓库一致）`)
+      : bad(`包内测试数 ${pkgTests.length} ≠ 仓库 ${repoTests.length}`);
+    const missing = repoTests.filter((n) => !pkgTests.includes(n));
+    missing.length === 0 ? ok("逐个文件都在") : bad(`缺：${missing.join("、")}`);
+  }
+
+  const fixture = path.join(PKG, "scripts", "fixtures", "theme-toggle.js");
+  fs.existsSync(fixture) ? ok("片段 fixture 随包（theme-toggle.js）") : bad("缺 scripts/fixtures/theme-toggle.js");
+
+  /* 包内自洽：验收与回归里点名要用的脚本必须真的在包里。
+     只带 test-*.mjs 时，包内跑 verify 会在 [28]/[46]/[47] 上红 ——
+     「装完能自证」就成了只在仓库成立的说法。 */
+  const pkgScriptNames = new Set(fs.readdirSync(path.join(PKG, "scripts")));
+  const repoScriptNames = new Set(fs.readdirSync(path.join(ROOT, "scripts")));
+  const referenced = new Set();
+  const scanFiles = ["verify.mjs", ...pkgTests];
+  for (const f of scanFiles) {
+    const text = fs.readFileSync(path.join(PKG, "scripts", f), "utf8");
+    for (const m of text.matchAll(/["'`]([a-z0-9-]+\.(?:mjs|json))["'`]/g)) referenced.add(m[1]);
+  }
+  /* build.mjs 只在「dist 不存在，先跑 node scripts/build.mjs」这句报错里被点名：
+     它需要整个仓库（overlay/vendor），不可能随包分发，也不该算依赖。 */
+  const MENTION_ONLY = new Set(["build.mjs"]);
+  const danglingDeps = [...referenced]
+    .filter((n) => repoScriptNames.has(n) && !pkgScriptNames.has(n) && !MENTION_ONLY.has(n))
+    .sort();
+  danglingDeps.length === 0
+    ? ok(`包内自洽：验收/回归点名的 ${[...referenced].filter((n) => repoScriptNames.has(n)).length} 个脚本都在包内`)
+    : bad(`包内缺依赖：${danglingDeps.join("、")}（装完跑 verify 会在这几组上红）`);
+
+  /* 真的在包内跑一个：这是「能复跑」的唯一硬证据。挑行为最重的那个。 */
+  try {
+    const out = execFileSync(process.execPath, [path.join("scripts", "test-proxy-pool.mjs")], {
+      cwd: PKG, encoding: "utf8", timeout: 120000,
+    });
+    const m = out.match(/(\d+)\s*通过\s*\/\s*(\d+)\s*失败/);
+    (m && Number(m[2]) === 0 && Number(m[1]) > 0)
+      ? ok(`包内实跑 test-proxy-pool：${m[1]} 条断言全绿`)
+      : bad(`包内实跑没有给出有效汇总：${out.slice(-160)}`);
+  } catch (e) {
+    bad(`包内实跑失败：${(e.stdout || e.message || "").split("\n").slice(-3).join(" ")}`);
+  }
+}
+
+// [46] 故障注入（审计 B-12：验收只会「查字符串在不在」，从不构造故障）
+// 把包整份复制到临时目录 → 故意改坏一处行为 → 指定回归必须变红。
+// 改坏之后仍然全绿，说明那条测试守的不是行为，只是字符串。
+console.log("[46] 故障注入（改坏一处行为，指定回归必须变红）");  // 结构
+{
+  try {
+    const out = execFileSync(process.execPath, [path.join("scripts", "mutate-check.mjs")], {
+      cwd: ROOT, encoding: "utf8", timeout: 600000,
+    });
+    const m = out.match(/故障注入：(\d+)\/(\d+) 被检出/);
+    (m && Number(m[1]) === Number(m[2]) && Number(m[2]) > 0)
+      ? ok(`${m[2]} 个变异全部被检出`)
+      : bad(`变异未被全部检出：${(m ? m[0] : out.slice(-200))}`);
+  } catch (e) {
+    bad(`故障注入门禁失败：${String(e.stdout || e.message || "").split("\n").slice(-4).join(" ")}`);
+  }
+}
+
+// [47] 行为归属（审计 B-3：验收里大量断言只是「这行字符串还在文件里」）
+// 每个验收组必须在行尾说明它凭什么算数，两种答案：
+//   // 结构                —— 断言的是构建产物本身（计数、命名、文档一致性、能否 import）
+//   // 回归 test-x.mjs     —— 断言的是**行为**，由那条回归脚本证明（可逗号列多条）
+// 声明的脚本必须在**已打包**的 scripts/ 里 —— [45] 保证包内能跑，两者合起来才是
+// 「这条行为有测试，而且测试跟着包走」。两边的下限防止「全标结构」把它变成恒绿。
+console.log("[47] 行为归属（每个验收组都要说明凭什么算数）");  // 结构
+{
+  /* 判定逻辑住在 scripts/check-proof-classes.mjs：它自己有合成用例的回归
+     （scripts/test-proof-classes.mjs），比把逻辑内联在这里更可测。 */
+  let out = "";
+  let code = 0;
+  try {
+    out = execFileSync(process.execPath, [
+      path.join(ROOT, "scripts", "check-proof-classes.mjs"),
+      `--file=${path.join(ROOT, "scripts", "verify.mjs")}`,
+      `--pkg=${PKG}`,
+    ], { cwd: ROOT, encoding: "utf8" });
+  } catch (e) {
+    out = `${e.stdout || ""}${e.stderr || ""}`;
+    code = e.status ?? 1;
+  }
+  const m = out.match(/行为归属：(\d+) 组 · 结构 (\d+) · 行为 (\d+)/);
+  if (code !== 0) {
+    bad(`行为归属不通过：${out.split("\n").filter((l) => l.includes("FAIL")).join(" · ") || out.trim().slice(-200)}`);
+  } else if (!m) {
+    bad("行为归属没有输出计数（脚本可能被改成空壳）");
+  } else {
+    ok(`${m[1]} 个验收组全部声明了归属`);
+    ok(`结构 ${m[2]} 组 · 行为 ${m[3]} 组（下限 ${22} / ${26}）`);
+    ok(`声明的回归脚本都在包内（包内能跑由 [45] 保证）`);
+    console.log(`     结构 ${m[2]} · 行为 ${m[3]}`);
+  }
+  /* 「不适用」是唯一能让一组不产出判定的口子，所以它必须被计数并设上限。
+     上限 2 = 已知的两处（[7] 整组 + [10] 的基座版本比对），都在仓库侧。 */
+  /* 上限 7 = 目前全部「只能仓库侧做」的位置，逐个点名（多一个就说明有人在加口子）：
+       [7] 在线更新通道 / [10] 基座版本比对 / [22] 构建摘要守卫 /
+       [24] 维护文档不进包 / [26] 计数复算 / [28] op 契约 /
+       [49] 构建输入受版本控制（已安装的包里没有 .git）。 */
+  const SKIP_CAP = 7;
+  skipped <= SKIP_CAP
+    ? ok(`不适用 ${skipped} 组（上限 ${SKIP_CAP}）`)
+    : bad(`不适用 ${skipped} 组，超过上限 ${SKIP_CAP} —— 「不适用」正在被当挡箭牌`);
+  if (skipped > 0) console.log(`     本次在${IN_REPO ? "仓库" : "包内"}模式运行，${skipped} 处只能报不适用`);
+}
+
+// [48] 变异覆盖（R17：声明了回归脚本 ≠ 那条回归真的会红）
+// [47] 保证「每个行为组都有一条回归脚本」，但一条从没被改坏过的回归，和一条
+// 不存在的回归，在输出里长得一模一样。这一组要求每个行为组都被至少一条变异
+// **显式认领**（mutations.json 里的 "groups": [N]），且认领必须有效：
+// 组号是行为组、该组声明的测试里确实包含这条变异的 test。
+console.log("[48] 变异覆盖（每个行为组都有会红的判据）");  // 结构
+{
+  /* 判定逻辑住在 scripts/check-mutation-coverage.mjs。
+     配对方式有讲究：--file 用**这次正在跑的** verify.mjs，--manifest 用**随包发布**的
+     那份 mutations.json —— 两边都必须是真货，否则可以拿一份改了组号的副本来骗过门禁。 */
+  let out = "";
+  let code = 0;
+  try {
+    out = execFileSync(process.execPath, [
+      path.join(ROOT, "scripts", "check-mutation-coverage.mjs"),
+      `--file=${path.join(ROOT, "scripts", "verify.mjs")}`,
+      `--manifest=${path.join(PKG, "scripts", "mutations.json")}`,
+    ], { cwd: ROOT, encoding: "utf8" });
+  } catch (e) {
+    out = `${e.stdout || ""}${e.stderr || ""}`;
+    code = e.status ?? 1;
+  }
+  const m = out.match(/变异覆盖：行为组 (\d+) · 有变异认领 (\d+) · 变异 (\d+) · 孤儿 (\d+)/);
+  if (code !== 0) {
+    bad(`变异覆盖不通过：${out.split("\n").filter((l) => l.includes("FAIL")).join(" · ") || out.trim().slice(-200)}`);
+  } else if (!m) {
+    bad("变异覆盖没有输出计数（脚本可能被改成空壳）");
+  } else {
+    ok(`${m[1]} 个行为组全部有变异认领（${m[2]}/${m[1]}）`);
+    ok(`清单里 ${m[3]} 条变异，认领关系全部有效`);
+    console.log(`     孤儿变异 ${m[4]} 条（守的是 [33] 汇总里的回归，不对应单个行为组）`);
+  }
+}
+
+// [49] 构建输入受版本控制（R18）
+// R15 修的是「仓库能重建出包」，这一组修的是「克隆能重建出仓库」。
+// dist/ 不进 git，产物完全由 overlay/ + scripts/ 决定；只要有一个输入没提交，
+// 别人克隆再 build 得到的包与本机这份不是同一个东西，而构建照样成功。
+console.log("[49] 构建输入受版本控制");  // 回归 test-tracked.mjs
+{
+  const isGit = fs.existsSync(path.join(ROOT, ".git"));
+  if (!isGit) {
+    na("构建输入受版本控制需要 .git（已安装的包里没有版本控制）");
+  } else {
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(process.execPath, [path.join(ROOT, "scripts", "check-tracked.mjs"), `--repo=${ROOT}`],
+        { cwd: ROOT, encoding: "utf8", timeout: 120000 });
+    } catch (e) {
+      out = `${e.stdout || ""}${e.stderr || ""}`;
+      code = e.status ?? 1;
+    }
+    const m = out.match(/构建输入：(\d+) 个 · 已跟踪 (\d+) · 未跟踪 (\d+)/);
+    if (code !== 0) {
+      bad(`构建输入不受版本控制：${out.split("\n").filter((l) => l.startsWith("FAIL")).join(" · ") || out.trim().slice(-200)}`);
+    } else if (!m) {
+      bad("构建输入门禁没有输出计数（脚本可能被改成空壳）");
+    } else {
+      ok(`构建输入 ${m[1]} 个全部受版本控制（未跟踪 ${m[3]}）`);
+      /* 「输入集合」本身也要有个下限：把枚举改成空集同样能全绿。 */
+      Number(m[1]) >= 100
+        ? ok(`输入集合 ${m[1]} 个（下限 100）`)
+        : bad(`输入集合只有 ${m[1]} 个，枚举口径被改坏了`);
+    }
+  }
+}
+
+// [50] R11–R15 审计缺陷回归（13 条修复，此前只有变异守着、没有验收组认领）
+// 这 13 条是 R11–R15 逐轮审计里修掉的真实缺陷，各有 1 条变异证明「改回去会红」。
+// 但 [48] 一直把它们的变异算成「孤儿」—— 孤儿的意思是：**没有任何验收组认领它**。
+// 也就是说这 13 条修复在验收面上不存在，只有变异门禁自己知道它们被守住了。
+//
+// 这一组把认领补齐，并且是**双向**的：
+//   · 表里的每一条，manifest 必须真的认领 [50]（删掉认领就红）；
+//   · manifest 里认领 [50] 的每一条，必须在这张表里（偷偷塞一条进来也红）；
+//   · 四条脚本现场跑一遍（不是 grep），断言数下限防止被改成空壳。
+console.log("[50] R11–R15 审计缺陷回归");  // 回归 test-r11-fixes.mjs, test-r13-fixes.mjs, test-r14-fixes.mjs, test-r15-tools.mjs
+{
+  /* id / 守它的脚本 / 修的是什么。id 与 scripts/mutations.json 一一对应。 */
+  const TABLE = [
+    ["M3-preset-wait-dup", "test-r11-fixes.mjs", "预设自愈插出第二段等待文案，旧的那段还在（PL-03）"],
+    ["M7-savePrompt-wipe", "test-r11-fixes.mjs", "漏传 content 被当成清空，角色提示词写成 0 字节（R11-1）"],
+    ["M8-trojan-base64", "test-r11-fixes.mjs", "trojan 口令被当 base64 解，节点永久连不上（R11-2）"],
+    ["M9-coverage-swallow", "test-r11-fixes.mjs", "覆盖度查不出来被报成「查得出来、没缺口」（R11-3）"],
+    ["M5-board-bytask", "test-r13-fixes.mjs", "任务板按任务定位退化成按会话，同会话多张卡只剩一条（PA-03/32）"],
+    ["M13-rollup-drift", "test-r13-fixes.mjs", "漂移被报成 skipped —— 软成功（CM-01）"],
+    ["M14-bak-empty", "test-r13-fixes.mjs", "0 字节 bak 永久占位，备份形同不存在（CM-10）"],
+    ["M16-cve-extract", "test-r13-fixes.mjs", "只从文件名取 CVE，正文里写编号的模板搜不到（PA-06）"],
+    ["M10-template-offset", "test-r14-fixes.mjs", "面板翻页参数被丢，「下一页」永远是同一页（PA-08）"],
+    ["M11-cleared-filter", "test-r14-fixes.mjs", "cleared 按当前页算，把「还有 20 条没删」报成已收尾（PL-04）"],
+    ["M12-like-escape", "test-r14-fixes.mjs", "值里的 % / _ 当通配符，搜一个 % 命中全库（PL-07）"],
+    ["M15-queue-skip", "test-r14-fixes.mjs", "已放弃的资产重回队列，与提示词「直接跳过」矛盾（PA-16）"],
+    ["M6-slot-report-enum", "test-r15-tools.mjs", "report 枚举退回四个值，子智能体报 failed 被参数校验拒掉（PA-30）"],
+  ];
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(PKG, "scripts", "mutations.json"), "utf8"));
+  const byId = new Map(manifest.map((m) => [m.id, m]));
+
+  const missing = TABLE.filter(([id]) => !byId.has(id)).map(([id]) => id);
+  missing.length === 0 ? ok(`清单里 ${TABLE.length} 条变异都在`) : bad(`清单里缺：${missing.join("、")}`);
+
+  const unclaimed = TABLE.filter(([id]) => byId.has(id) && !(byId.get(id).groups || []).includes(50)).map(([id]) => id);
+  unclaimed.length === 0
+    ? ok(`${TABLE.length} 条变异都认领了 [50]`)
+    : bad(`没认领 [50]：${unclaimed.join("、")}`);
+
+  const tableIds = new Set(TABLE.map(([id]) => id));
+  const strangers = manifest.filter((m) => (m.groups || []).includes(50) && !tableIds.has(m.id)).map((m) => m.id);
+  strangers.length === 0
+    ? ok("没有「认领了 [50] 却不在表里」的变异")
+    : bad(`认领了 [50] 但表里没有：${strangers.join("、")}`);
+
+  /* 变异与脚本的配对必须与清单一致：表里写 A 脚本，清单里跑 B 脚本，
+     等于这条修复其实没人守。 */
+  const wrongScript = TABLE.filter(([id, script]) => byId.has(id) && byId.get(id).test !== script).map(([id]) => id);
+  wrongScript.length === 0 ? ok("表里记的脚本与清单一致") : bad(`脚本对不上：${wrongScript.join("、")}`);
+
+  /* 现场跑四条脚本：断言数下限防止「脚本被改成空壳但退出 0」。 */
+  const scripts = [...new Set(TABLE.map(([, s]) => s))];
+  const MIN = { "test-r11-fixes.mjs": 40, "test-r13-fixes.mjs": 25, "test-r14-fixes.mjs": 30, "test-r15-tools.mjs": 12 };
+  let total = 0;
+  for (const name of scripts) {
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(process.execPath, [path.join(ROOT, "scripts", name)], { cwd: ROOT, encoding: "utf8", timeout: 180000 });
+    } catch (e) {
+      out = `${e.stdout || ""}${e.stderr || ""}`;
+      code = e.status ?? 1;
+    }
+    const m = out.match(/(\d+)\s*通过\s*\/\s*(\d+)\s*失败/);
+    if (code !== 0 || !m || Number(m[2]) !== 0) {
+      bad(`${name} 没跑绿：${(m ? m[0] : out.trim().split("\n").slice(-2).join(" "))}`);
+    } else if (Number(m[1]) < (MIN[name] || 1)) {
+      bad(`${name} 只有 ${m[1]} 条断言（下限 ${MIN[name]}）—— 可能被改成空壳`);
+    } else {
+      total += Number(m[1]);
+      ok(`${name}：${m[1]} 条断言全绿`);
+    }
+  }
+  console.log(`     四条脚本合计 ${total} 条断言，覆盖 ${TABLE.length} 条审计缺陷`);
+}
+
 console.log("");
 if (failed) { console.error(`验收失败：${failed} 项`); process.exit(1); }
 console.log("验收通过（本次全程只读，宿主未被修改）。");
 
 // ── helpers ────────────────────────────────────────────────────
+/** 按大括号配平取出 `sig` 之后的方法/函数体（含首尾大括号）。
+ *  必须先跳过参数表的 `)`：签名里可能有默认值 `options = {}`，
+ *  直接从签名后的第一个 `{` 开始配平会立刻闭合，取到的是 `{}` 而不是函数体。 */
+function bodyOf(src, sig) {
+  const start = src.indexOf(sig);
+  if (start < 0) return "";
+  let i = src.indexOf("(", start);
+  if (i < 0) return "";
+  let parens = 0;
+  for (; i < src.length; i += 1) {
+    if (src[i] === "(") parens += 1;
+    else if (src[i] === ")") { parens -= 1; if (parens === 0) { i += 1; break; } }
+  }
+  i = src.indexOf("{", i);
+  if (i < 0) return "";
+  let depth = 0;
+  for (; i < src.length; i += 1) {
+    if (src[i] === "{") depth += 1;
+    else if (src[i] === "}") { depth -= 1; if (depth === 0) return src.slice(start, i + 1); }
+  }
+  return "";
+}
 function countOcc(hay, needle) {
   if (!needle) return 0;
   let n = 0, i = 0;

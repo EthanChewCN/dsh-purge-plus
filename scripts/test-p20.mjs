@@ -13,8 +13,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/* 既能在仓库里跑（scripts/../dist/build/package），也能在**已安装的包里**跑
+   （发布包现在带 test-*.mjs，脚本所在包的根就是包根；审计 B-5）。
+   注意这里用脚本自身位置而不是 ROOT —— 有些测试的 ROOT 是临时库目录。 */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PKG = process.env.PURGE_PKG || (fs.existsSync(path.join(HERE, "..", "dist", "build", "package"))
+  ? path.join(HERE, "..", "dist", "build", "package")
+  : path.join(HERE, ".."));
+const { RedteamStore, dispatch } = await import(path.join(PKG, "lib", "redteam", "store-core.js"));
+const { dispatchAsync } = await import(path.join(PKG, "lib", "redteam", "store-core.js"));
+
 /* PURGE_PKG 可指向一份被改坏的副本，用于变异测试（证明断言真的能红）。 */
-const PKG = process.env.PURGE_PKG || path.join(ROOT, "dist", "build", "package");
+/* PKG 已在上面解析（脚本自身位置优先）；PURGE_PKG 仍可覆盖。 */
+const PKG_OVERRIDE = process.env.PURGE_PKG || "";
 
 let pass = 0;
 const fails = [];
@@ -212,7 +223,6 @@ for (const [label, src] of [["client.js", panel], ["lib/redteam/client.js", redt
 }
 
 /* ── 二、store 侧：字段级对齐 + 情报刷新 ───────────────────────────── */
-const { RedteamStore, dispatch } = await import(path.join(PKG, "lib", "redteam", "store-core.js"));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "purge-p20-"));
 const root = path.join(tmp, "redteam");
 const store = new RedteamStore(root);
@@ -273,8 +283,14 @@ ok("scoreReport：report 里有四段结构",
   ["asset_proof", "stage_summary", "repro", "cleanup"].every((k) => simple.report[k] !== undefined));
 ok("scoreReport：markdown 非空", typeof simple.markdown === "string" && simple.markdown.length > 0);
 ok("scoreReport：report 里不再重复带 markdown（避免两份大字符串）", simple.report.markdown === undefined);
-const legacy = store.scoreReport(engId, {});
-eq("scoreReport：默认仍是 legacy", legacy.layout, "legacy");
+/* [PA-05] 默认已对齐 safe 2.0.2：不传 layout 走 simple。
+   legacy 仍然可用，只是要显式要 —— 这里两条都验，防止有人把默认翻回去。 */
+const byDefault = store.scoreReport(engId, {});
+eq("scoreReport：默认走 simple（与 safe 一致）", byDefault.layout, "simple");
+ok("scoreReport：默认带 report 结构化对象", byDefault.report && byDefault.report.stage_tables !== undefined);
+const legacy = store.scoreReport(engId, { layout: "legacy" });
+eq("scoreReport：显式 layout:'legacy' 仍然可用", legacy.layout, "legacy");
+ok("scoreReport：legacy 不带 report 对象", legacy.report === undefined);
 eq("scoreReport：两条路径的总分一致", simple.summary.points, legacy.summary.points);
 const viaOp = dispatch(store, { op: "scoreReport", engagement: engId, layout: "simple" });
 eq("scoreReport op：透传 layout", viaOp.layout, "simple");
@@ -439,7 +455,6 @@ ok("reportV2：清理项带 location（报告第四段「位置」列靠它）",
 
 /* 2.14 op 路由：intelUpdate 走异步分发 */
 globalThis.fetch = realFetch;
-const { dispatchAsync } = await import(path.join(PKG, "lib", "redteam", "store-core.js"));
 const opOut = await dispatchAsync(store, { op: "intelUpdate", target: "wordlists" });
 eq("dispatchAsync：intelUpdate 可达", opOut.ok, true);
 eq("dispatchAsync：返回 results 数组", Array.isArray(opOut.results), true);
