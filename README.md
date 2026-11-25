@@ -286,10 +286,10 @@ node scripts/verify.mjs
 | 26 | 文档数字 vs 代码复算（192 / 92 / 88 / 95） | 文档开始说谎 |
 | 28 | op 契约（两家上游并集 84 vs 产物 106） | 上游能力面漏移植或 UI 写错 op 名 |
 | 32 | 文档与产物一致性（页签数 / 分组数 / 自有补丁清单 / 悬空文件引用） | README 描述的东西产物里没有 |
-| 33 | 回归测试汇总（18 个 `test-*.mjs` 一起跑） | 行为坏了而验收照样绿 |
+| 33 | 回归测试汇总（38 个 `test-*.mjs` 一起跑） | 行为坏了而验收照样绿 |
 | 35 | `engines.node` 与代码里 `node:sqlite` 的 import 对齐 | 声明支持的 Node 版本装下去会直接崩 |
 
-**[33] 存在的原因**：在 [33] 之前，验收只查结构，没有一组会跑那 18 个行为测试。于是「verify 全绿」和「行为没坏」是两件事 —— 有人把 `dispatch` 改坏，只要不碰验收断言就照样绿。全量跑完只要几秒，没有理由不跑。
+**[33] 存在的原因**：在 [33] 之前，验收只查结构，没有一组会跑 `test-*.mjs`。于是「verify 全绿」和「行为没坏」是两件事 —— 有人把 `dispatch` 改坏，只要不碰验收断言就照样绿。全量跑完只要几秒，没有理由不跑。
 
 全部只读，不写宿主、不改状态。
 
@@ -312,7 +312,7 @@ overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         50 组只读验收
 scripts/check-rebuild.mjs  克隆重建一致性（发布前跑一次）
-scripts/test-*.mjs         18 个行为回归（被 verify [33] 汇总执行）
+scripts/test-*.mjs         38 个行为回归（被 verify [33] 汇总执行）
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → 本机 CVE 底库
 scripts/sync-upstream.sh   上游升级：换 vendor → 重放 → 重建 → 验收
 ```

@@ -279,10 +279,10 @@ All 34 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (t
 | 26 | Doc numbers vs recomputed code counts (192 / 92 / 88 / 95) | the docs started lying |
 | 28 | Op contract (upstream union 84 vs product 94) | an upstream capability is missing, or the UI names a wrong op |
 | 32 | Docs vs product (tab count / group count / own-patch list / dead file references) | the README describes something the product does not have |
-| 33 | Regression roll-up (all 18 `test-*.mjs` run together) | behaviour is broken while verification stays green |
+| 33 | Regression roll-up (all 38 `test-*.mjs` run together) | behaviour is broken while verification stays green |
 | 35 | `engines.node` aligned with the `node:sqlite` import in the code | the declared Node version crashes on install |
 
-**Why [33] exists**: the first 32 groups only inspect structure; none of them runs the 18 behavioural test scripts. So "verify is green" and "nothing is broken" were two different claims — break `dispatch` and everything stays green as long as you avoid the verification assertions. The full run takes a few seconds, so there is no reason to skip it.
+**Why [33] exists**: the first 32 groups only inspect structure; none of them runs the `test-*.mjs` behavioural scripts. So "verify is green" and "nothing is broken" were two different claims — break `dispatch` and everything stays green as long as you avoid the verification assertions. The full run takes a few seconds, so there is no reason to skip it.
 
 Everything is read-only: no host writes, no state changes.
 
@@ -305,7 +305,7 @@ overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         50 read-only checks
 scripts/check-rebuild.mjs  clone-rebuild consistency (before release)
-scripts/test-*.mjs         18 behavioural regressions (run by verify [33])
+scripts/test-*.mjs         38 behavioural regressions (run by verify [33])
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → local CVE base DB
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify
 ```
