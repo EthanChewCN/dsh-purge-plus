@@ -79,20 +79,31 @@ try {
   if (onlyClone.length) problems.push(`只在克隆：${onlyClone.join("、")}`);
   if (differing.length) problems.push(`字节不同：${differing.join("、")}`);
 
+  /* 与 build.mjs 的 contentDigest **逐字同一套规则**（排序路径 + 每文件 sha256，
+     剔除构建时刻）。自己发明一套的代价本轮已经付过：第一版只剔了 dsh.generatedAt，
+     而字段其实在 plus.generatedAt 下 —— 于是这条判据对同一份产物报「摘要不同」，
+     差点被当成真的不一致。 */
+  const stableBytes = (rel, abs) => {
+    const buf = fs.readFileSync(abs);
+    if (rel !== "package.json") return buf;
+    try {
+      const parsed = JSON.parse(buf.toString("utf8"));
+      /* 构建时刻可能出现在顶层 / dsh / plus 任意一处，全部剔除 */
+      for (const holder of [parsed, parsed && parsed.dsh, parsed && parsed.plus]) {
+        if (holder && typeof holder === "object") delete holder.generatedAt;
+      }
+      return Buffer.from(JSON.stringify(parsed, null, 2) + "\n", "utf8");
+    } catch {
+      return buf;
+    }
+  };
   const digest = (dir) => {
     const h = createHash("sha256");
     for (const f of list(dir)) {
-      const raw = fs.readFileSync(path.join(dir, f));
-      /* package.json 的 dsh.generatedAt 是构建时刻，两边必然不同 —— 与 build.mjs
-         的 contentDigest 同一规则，必须剔除，否则这条判据永远红。 */
-      if (f === "package.json") {
-        const j = JSON.parse(raw.toString("utf8"));
-        if (j.dsh && typeof j.dsh === "object") delete j.dsh.generatedAt;
-        h.update(`${f}\0${JSON.stringify(j)}`);
-      } else {
-        h.update(`${f}\0`);
-        h.update(raw);
-      }
+      if (path.basename(f).startsWith("._")) continue;   // macOS AppleDouble
+      h.update(f + "\0");
+      h.update(createHash("sha256").update(stableBytes(f, path.join(dir, f))).digest("hex"));
+      h.update("\n");
     }
     return h.digest("hex");
   };
@@ -101,6 +112,13 @@ try {
   if (dLocal !== dClone) problems.push(`内容摘要不同：本机 ${dLocal.slice(0, 16)}… / 克隆 ${dClone.slice(0, 16)}…`);
 
   console.log(`文件数 ${a.length} vs ${b.length} · 内容摘要 ${dLocal.slice(0, 16)}…`);
+  /* 本机摘要必须与 dist/*.tgz.content 侧车一致：不一致说明 dist 落后于源码，
+     那就不是「克隆对不对」的问题，而是「本机这份该重建了」。 */
+  const sidecars = fs.readdirSync(path.join(ROOT, "dist")).filter((n) => n.endsWith(".tgz.content"));
+  const side = sidecars.map((n) => [n, fs.readFileSync(path.join(ROOT, "dist", n), "utf8").trim()])
+    .find(([, v]) => v === dLocal);
+  if (side) console.log(`与本机侧车一致：dist/${side[0]}`);
+  else problems.push(`本机 dist 落后于源码（摘要与任何 .tgz.content 都不一致）：先重跑 build`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);
     console.error("克隆重建一致性：FAIL");
