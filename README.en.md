@@ -304,6 +304,7 @@ overlay/edits.mjs          309 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         50 read-only checks
+scripts/check-rebuild.mjs  clone-rebuild consistency (before release)
 scripts/test-*.mjs         18 behavioural regressions (run by verify [33])
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → local CVE base DB
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify

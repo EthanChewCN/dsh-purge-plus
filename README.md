@@ -311,6 +311,7 @@ overlay/edits.mjs          309 条锚点编辑清单
 overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         50 组只读验收
+scripts/check-rebuild.mjs  克隆重建一致性（发布前跑一次）
 scripts/test-*.mjs         18 个行为回归（被 verify [33] 汇总执行）
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → 本机 CVE 底库
 scripts/sync-upstream.sh   上游升级：换 vendor → 重放 → 重建 → 验收
