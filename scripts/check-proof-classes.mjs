@@ -98,7 +98,10 @@ const result = {
 if (asJson) {
   console.log(JSON.stringify(result, null, 2));
 } else if (result.ok) {
-  console.log(`行为归属：${heads.length} 组 · 结构 ${structural.length} · 行为 ${behavioral.length} · OK`);
+  /* 下限一起打印：调用方（verify [47]）要在人看的输出里写「下限 N / M」。
+     写在调用方的字符串里就会漂 —— R18 实测它写着「下限 22 / 26」而实际是 26 / 24。 */
+  console.log(`行为归属：${heads.length} 组 · 结构 ${structural.length} · 行为 ${behavioral.length}`
+    + ` · 下限 ${MIN_BEHAVIORAL} / ${MIN_STRUCTURAL} · OK`);
 } else {
   console.log(`行为归属：${heads.length} 组 · 结构 ${structural.length} · 行为 ${behavioral.length}`);
   for (const p of problems) console.error(`  FAIL ${p}`);
