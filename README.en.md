@@ -7,7 +7,7 @@
 Separate the host layer from the model layer: whether the model is willing to answer is one question; how many gates the host puts in front of it is another.
 
 [![Release](https://img.shields.io/github/v/release/EthanChewCN/dsh-purge-plus?label=release&color=6E56CF)](https://github.com/EthanChewCN/dsh-purge-plus/releases)
-[![Patches](https://img.shields.io/badge/host%20patches-95-3B82F6)](#what-you-get)
+[![Patches](https://img.shields.io/badge/host%20patches-96-3B82F6)](#what-you-get)
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5-22D3EE)](https://github.com/deepseek-ai/deepseek-harness)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](#license-and-attribution)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A522.5-339933?logo=node.js&logoColor=fff)](#prerequisites)
@@ -70,7 +70,7 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 
 | Layer | Content |
 | :--- | :--- |
-| **Host patches** | **95** = 88 upstream + 7 own (id ≥ 201, all listed below) |
+| **Host patches** | **96** = 88 upstream + 8 own (id ≥ 201, all listed below) |
 | Own #201 | `PRODUCT_ANALYTICS_DEFAULT_OFF` — product analytics off by default |
 | Own #202 | `PRODUCT_TELEMETRY_OTEL_NOOP` — product telemetry OTLP exporter becomes a no-op |
 | Own #203 | `SESSION_TELEMETRY_OTEL_DISABLED` — session telemetry defaults to `DISABLED` |
@@ -101,7 +101,7 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 | Drift detection | **16 sites**, can say *why* a patch did not apply | none | takes community |
 | Ops layer | **15 modules / 1,441 lines** | slim | takes community |
 | Update channel | **works** | repo coordinates left blank | takes community, repointed here |
-| Patch coverage | 88 | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | 95 (88 + 7 own) |
+| Patch coverage | 88 | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | 96 (88 + 8 own) |
 | Runtime hooks | 10 events | **13 events** | on demand |
 | Host write elevation | none | **`ensureHostWritable` suite** | not ported (see below) |
 | Drill desk | 10 tabs | 12 tabs + 6 groups | **14 tabs / 6 groups** (includes "credentials & files" and the task board) |
@@ -265,23 +265,23 @@ The 3 edits marked `required: false` only warn instead of aborting — they are 
 node scripts/verify.mjs
 ```
 
-All 34 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (the ones a reader is most likely to hit):
+All 54 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (the ones a reader is most likely to hit):
 
 | # | Check | A failure means |
 | :--- | :--- | :--- |
 | 1 | Patch table / fence / entry import | package structure broken |
-| 2 | 95 patches, 7 own, no duplicate ids | patch table corrupted |
+| 2 | 96 patches, 8 own, no duplicate ids | patch table corrupted |
 | 3 | Real host `--status` locates the `@deepseek-ai` root | host path moved |
-| 4 | The 7 own patches appear in status | patches not wired into the index |
+| 4 | The 8 own patches appear in status | patches not wired into the index |
 | 5 | Each own patch's anchor hits exactly once on the host | anchor stale after upgrade |
 | 6 | Entry loads under DSH's resolution context | export shape changed |
 | 7 | Update channel (tag whitelist / version compare / asset name / coordinate leftovers) | in-app upgrade would break |
 | 8 | `cordis.patch.yml` plugin name matches the package name | bundle would be silently skipped |
-| 26 | Doc numbers vs recomputed code counts (192 / 92 / 88 / 95) | the docs started lying |
-| 28 | Op contract (upstream union 84 vs product 94) | an upstream capability is missing, or the UI names a wrong op |
+| 26 | Doc numbers vs recomputed code counts (341 / 96 / 88 / 96) | the docs started lying |
+| 28 | Op contract (upstream union 84 vs product 112) | an upstream capability is missing, or the UI names a wrong op |
 | 32 | Docs vs product (tab count / group count / own-patch list / dead file references) | the README describes something the product does not have |
-| 33 | Regression roll-up (all 38 `test-*.mjs` run together) | behaviour is broken while verification stays green |
-| 35 | `engines.node` aligned with the `node:sqlite` import in the code | the declared Node version crashes on install |
+| 33 | Regression roll-up (all 42 `test-*.mjs` run together) | behaviour is broken while verification stays green |
+| 34 | `engines.node` aligned with the `node:sqlite` import in the code | the declared Node version crashes on install |
 
 **Why [33] exists**: the first 32 groups only inspect structure; none of them runs the `test-*.mjs` behavioural scripts. So "verify is green" and "nothing is broken" were two different claims — break `dispatch` and everything stays green as long as you avoid the verification assertions. The full run takes a few seconds, so there is no reason to skip it.
 
@@ -306,7 +306,7 @@ overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         54 read-only checks
 scripts/check-rebuild.mjs  clone-rebuild consistency (before release)
-scripts/test-*.mjs         38 behavioural regressions (run by verify [33])
+scripts/test-*.mjs         42 behavioural regressions (run by verify [33])
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → local CVE base DB
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify
 ```

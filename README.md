@@ -7,7 +7,7 @@
 把「宿主层」和「模型层」分开看：模型愿不愿意答是一件事，宿主在它前面加了多少道闸是另一件事。
 
 [![Release](https://img.shields.io/github/v/release/EthanChewCN/dsh-purge-plus?label=release&color=6E56CF)](https://github.com/EthanChewCN/dsh-purge-plus/releases)
-[![Patches](https://img.shields.io/badge/宿主补丁-95-3B82F6)](#能力清单)
+[![Patches](https://img.shields.io/badge/宿主补丁-96-3B82F6)](#能力清单)
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5-22D3EE)](https://github.com/deepseek-ai/deepseek-harness)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-green)](#许可与署名)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A522.5-339933?logo=node.js&logoColor=fff)](#前置)
@@ -71,7 +71,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 
 | 层 | 内容 |
 | :--- | :--- |
-| **宿主补丁** | **95 条** = 上游 88 + 自有 7（id ≥ 201，全部逐条列在下面） |
+| **宿主补丁** | **96 条** = 上游 88 + 自有 8（id ≥ 201，全部逐条列在下面） |
 | 自有 #201 | `PRODUCT_ANALYTICS_DEFAULT_OFF` —— 产品埋点默认关 |
 | 自有 #202 | `PRODUCT_TELEMETRY_OTEL_NOOP` —— 产品遥测 OTLP 导出器变空实现 |
 | 自有 #203 | `SESSION_TELEMETRY_OTEL_DISABLED` —— 会话遥测默认 `DISABLED` |
@@ -103,7 +103,7 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 漂移检测 | **16 处**，能说出「为什么没打上」 | 无 | 取 community |
 | 运维层 | **15 个模块 / 1,441 行** | 精简 | 取 community |
 | 更新通道 | **可用** | 仓库坐标留空 | 取 community，改指本仓库 |
-| 补丁覆盖 | 88 条 | 59 条（2.0.0）/ 62（2.0.1）/ 64（2.0.2） | 95 条（88 + 自有 7） |
+| 补丁覆盖 | 88 条 | 59 条（2.0.0）/ 62（2.0.1）/ 64（2.0.2） | 96 条（88 + 自有 8） |
 | 运行时钩子 | 10 个事件 | **13 个事件** | 按需 |
 | 宿主写入提权 | 无 | **`ensureHostWritable` 四件套** | 未移植（见下） |
 | 演练台 | 10 tab | 12 tab + 6 分组 | **14 个页签 / 6 个分组**（已含「凭据与文件」「任务板」） |
@@ -277,18 +277,18 @@ node scripts/verify.mjs
 | # | 检查 | 失败意味着 |
 | :--- | :--- | :--- |
 | 1 | 补丁表 / 围栏 / 入口可 import | 包结构坏了 |
-| 2 | 95 条、自有 7 条、id 无重复 | 补丁表被改坏 |
+| 2 | 96 条、自有 8 条、id 无重复 | 补丁表被改坏 |
 | 3 | 真实宿主 `--status` 能定位 `@deepseek-ai` 根 | 宿主路径变了 |
-| 4 | 自有 7 条出现在状态里 | 补丁没接进汇总入口 |
+| 4 | 自有 8 条出现在状态里 | 补丁没接进汇总入口 |
 | 5 | 每条自有补丁的锚点在宿主上恰好命中 1 次 | 宿主升级后锚点失效 |
 | 6 | 插件入口在 DSH 解析上下文下加载成功 | 导出形状变了 |
 | 7 | 在线更新通道（tag 白名单 / 版本比较 / 资产名 / 坐标残留） | 面板升级会失效 |
 | 8 | `cordis.patch.yml` 插件名与包名一致 | bundle 会被静默跳过 |
-| 26 | 文档数字 vs 代码复算（192 / 92 / 88 / 95） | 文档开始说谎 |
-| 28 | op 契约（两家上游并集 84 vs 产物 106） | 上游能力面漏移植或 UI 写错 op 名 |
+| 26 | 文档数字 vs 代码复算（341 / 96 / 88 / 96） | 文档开始说谎 |
+| 28 | op 契约（两家上游并集 84 vs 产物 112） | 上游能力面漏移植或 UI 写错 op 名 |
 | 32 | 文档与产物一致性（页签数 / 分组数 / 自有补丁清单 / 悬空文件引用） | README 描述的东西产物里没有 |
-| 33 | 回归测试汇总（38 个 `test-*.mjs` 一起跑） | 行为坏了而验收照样绿 |
-| 35 | `engines.node` 与代码里 `node:sqlite` 的 import 对齐 | 声明支持的 Node 版本装下去会直接崩 |
+| 33 | 回归测试汇总（42 个 `test-*.mjs` 一起跑） | 行为坏了而验收照样绿 |
+| 34 | `engines.node` 与代码里 `node:sqlite` 的 import 对齐 | 声明支持的 Node 版本装下去会直接崩 |
 
 **[33] 存在的原因**：在 [33] 之前，验收只查结构，没有一组会跑 `test-*.mjs`。于是「verify 全绿」和「行为没坏」是两件事 —— 有人把 `dispatch` 改坏，只要不碰验收断言就照样绿。全量跑完只要几秒，没有理由不跑。
 
@@ -313,7 +313,7 @@ overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         54 组只读验收
 scripts/check-rebuild.mjs  克隆重建一致性（发布前跑一次）
-scripts/test-*.mjs         38 个行为回归（被 verify [33] 汇总执行）
+scripts/test-*.mjs         42 个行为回归（被 verify [33] 汇总执行）
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → 本机 CVE 底库
 scripts/sync-upstream.sh   上游升级：换 vendor → 重放 → 重建 → 验收
 ```

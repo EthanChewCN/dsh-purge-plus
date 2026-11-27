@@ -2,9 +2,9 @@
 // [dsh-purge-plus] 验收：只读地证明构建物可用，不写宿主、不改任何文件。
 //
 //   1. 包能 import（补丁表 / 围栏 / 入口）
-//   2. 补丁表不变式：95 条、自有 7 条 ≥201、id 无重复
+//   2. 补丁表不变式：96 条、自有 8 条 ≥201、id 无重复
 //   3. 真实宿主上 --status 能定位 @deepseek-ai 根（DSH_SURFACE=desktop）
-//   4. 自有 7 条出现在状态里（pending/applied/drifted 均可，不能消失）
+//   4. 自有 8 条出现在状态里（pending/applied/drifted 均可，不能消失）
 //   5. 锚点预演：每个自有补丁的 pattern 在宿主文件里的命中次数
 //      —— 命中 0 次 = 宿主升级后锚点烂了，必须重写；命中 ≥2 次 = 会打歪。
 
@@ -1205,6 +1205,8 @@ console.log("[25] 待办角标");  // 回归 test-attention-badge.mjs
 //   ② 2026-11-22 的第三方审计把上游补丁静态数成 87 条（漏了 new-tools
 //      里的 #90），据此宣布「95 条被推翻」。运行时 ALL_PATCHES 实测 88 条，
 //      88 + 自有 7 = 95，构建不变式本来就是对的 —— 错的是文本扫描。
+//      （后来加了自有 #209，总数变成 96 = 88 + 8；下面一律用 allIds.length，
+//      不再写死 —— 写死的那个数正是 README 停在 95 而没人发现的原因。）
 // 所以这里不数源码文本，而是 import 装配产物的补丁表；README 必须出现
 // 同一个数字，加一条编辑/补丁而不改文档就会在这里红。
 console.log("[26] 计数口径（文档 vs 代码复算）");  // 结构
@@ -1250,7 +1252,7 @@ if (!IN_REPO) {
     [`${edits.length} 条`, "锚点编辑条数"],
     [`${snippets} 处`, "snippet 注入点"],
     ["88 条", "上游补丁条数"],
-    ["95 条", "补丁合计"],
+    [`${allIds.length} 条`, "补丁合计"],
   ];
   for (const [needle, label] of must) {
     readme.includes(needle) ? ok(`README 含正确数字：${label} = ${needle}`) : bad(`README 缺失正确数字：${label}（应含「${needle}」）`);
