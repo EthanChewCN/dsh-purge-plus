@@ -151,5 +151,36 @@
       "why": "safe 2.0.2 mnemon-settings.js。基座 identity.js 无条件摘掉 mnemon 段，safe 给了个开关；本包把开关接出来，不用手改 JSON。",
       "guard": "test-anchor-mnemon.mjs"
     }
+  },
+  "_aliases_note": "safe 2.0.2 里另有 4 个 op 名，本包把它们实现成**同名别名**而不是新能力：底层函数一直在（cve-db.js / intel-sync.js），缺的只是名字。check-op-contract.mjs 把这里登记的名字算作「已认领」，不要求它们出现在 vendor 的并集里。",
+  "aliases": {
+    "cveSearch": {
+      "maps": "lib/redteam/cve-db.js searchCve()（redteam_cve op=search）",
+      "summary": "按关键词/CVE/厂商/产品/严重度/CVSS/KEV/有POC/时间检索公开漏洞底库。",
+      "why": "safe 2.0.2 的同名 op。外部自动化按 safe 的名字调用，本包原本回 unknown op。",
+      "diff": "safe 在 catch 里返回 ok:true（R11-safe SF-10）；这里返回 ok:false + error，但仍带 status 与 items:[]，形状兼容。",
+      "guard": "test-r22-alias.mjs"
+    },
+    "cveLookup": {
+      "maps": "lib/redteam/cve-db.js lookupCve()（redteam_cve op=lookup）",
+      "summary": "按一组 CVE 编号取详情。",
+      "why": "同上。",
+      "diff": "ids 接受数组或单值；非字符串项被丢弃，不会把 undefined 拼进 SQL。",
+      "guard": "test-r22-alias.mjs"
+    },
+    "templateCatalogStatus": {
+      "maps": "lib/redteam/cve-db.js templateCatalogStatus()（redteam_cve op=status 的 templates 段）",
+      "summary": "模板清单概览：总数、挂 CVE 的、按协议、按严重度。",
+      "why": "同上。",
+      "diff": "键名照抄 safe（status=模板清单、cve_db=底库状态），改过来会让按 safe 写的调用方读空。",
+      "guard": "test-r22-alias.mjs"
+    },
+    "intelSync": {
+      "maps": "store.intelUpdate('cve')（intel-sync.js syncIntel）",
+      "summary": "把 CVE 底库整库换成远端那一份：清单 → sha256 → 解压校验 → 原子顶替。",
+      "why": "safe 2.0.2 的同名 op。",
+      "diff": "走 intelUpdate 那条路，多记一行 update-log；action=skipped 时补一句「没联网也没落盘」。",
+      "guard": "test-r22-alias.mjs"
+    }
   }
 }

@@ -18,9 +18,28 @@
 
   addDataProof(id, d = {}) {
     const db = this.db(id)
+    /* [dsh-purge-plus] 兼容 safe 的 `{ proof: {…} }` 包装（safe 的约定是 `req.proof || req`）。 */
+    if (d !== null && typeof d === 'object' && !Array.isArray(d)
+      && d.proof !== null && typeof d.proof === 'object' && !Array.isArray(d.proof)) {
+      d = d.proof
+    }
     const rowCount = Number(d.row_count)
     if (!Number.isFinite(rowCount) || rowCount < 0) throw new Error('data_proof.row_count 必须是非负数字')
-    const fields = Array.isArray(d.fields) ? d.fields.join(',') : String(d.fields || '')
+    const fields = (() => {
+      /* [dsh-purge-plus] fields 是「泄露了哪些字段」的判定依据（reportV2 第一段按它
+         算敏感数据条数）。曾经对任何类型直接 String()：传 {a:1} 会落成
+         ["[object Object]"]，报告里就写成「泄露字段：[object Object]」，ok:true。
+         只收字符串或字符串数组，其余一律拒绝。 */
+      if (Array.isArray(d.fields)) {
+        for (const f of d.fields) {
+          if (typeof f !== 'string') throw new TypeError('data_proof.fields 数组元素必须是字符串，收到 ' + JSON.stringify(f))
+        }
+        return d.fields.map((f) => f.trim()).filter(Boolean).join(',')
+      }
+      if (typeof d.fields === 'string') return d.fields.trim()
+      if (d.fields === undefined || d.fields === null) return ''
+      throw new TypeError('data_proof.fields 必须是字符串或字符串数组，收到 ' + (typeof d.fields))
+    })()
     if (fields.trim() === '') throw new Error('data_proof.fields required：写清泄露字段（如 姓名/身份证号/手机号）')
     const r = db.prepare(`INSERT INTO data_proof(asset_id, vuln_id, target, source, interface, fields, row_count, sample, query, evidence_ref, pii_type, note, created_by, created_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
@@ -188,15 +207,35 @@
     }
 
     /* ── 二、得分汇总表 ─────────────────────────────────────────────── */
-    const stageSummary = (base.stages || []).map((st) => ({
-      code: st.code,
-      name: st.name,
-      ordinal: st.ordinal,
-      count: st.items.length,
-      points: st.points,
-      cumulative: st.cumulative,
-    }))
-    const stageTables = {}
+    /* [dsh-purge-plus] 四个阶段**恒有行**（safe 的 REPORT_STAGES 同形）。
+       过去只输出「有 items 的阶段」，于是同一份数据 safe 给 4 行、我方给 1 行 ——
+       按 safe 写的报告模板遍历 stage_summary 时，空阶段会被当成「阶段不存在」
+       而不是「这一阶段 0 条」（R21-safe 审计 P1）。 */
+    const REPORT_STAGE_ORDER = ['internet', 'boundary', 'internal', 'target']
+    const stageByCode = new Map((base.stages || []).map((st) => [st.code, st]))
+    const stageSummary = REPORT_STAGE_ORDER.map((code) => {
+      const st = stageByCode.get(code)
+      const meta = stageMeta.get(code) || {}
+      return {
+        code,
+        name: (st && st.name) || meta.name || code,
+        ordinal: (st && st.ordinal) !== undefined ? st.ordinal : meta.ordinal,
+        count: st ? st.items.length : 0,
+        points: st ? st.points : 0,
+        cumulative: st ? st.cumulative : 0,
+      }
+    })
+    /* 用户自建的阶段（不在四段里）追加在后面，不丢 */
+    for (const st of (base.stages || [])) {
+      if (REPORT_STAGE_ORDER.includes(st.code)) continue
+      stageSummary.push({
+        code: st.code, name: st.name, ordinal: st.ordinal,
+        count: st.items.length, points: st.points, cumulative: st.cumulative,
+      })
+    }
+    /* 四个键恒在（空阶段给空数组）：safe 的 stage_tables 同形，
+       否则按 safe 写的模板 `report.stage_tables.internet.length` 会抛 TypeError。 */
+    const stageTables = { internet: [], boundary: [], internal: [], target: [] }
     for (const it of items) {
       const code = it.stage_code || 'internet'
       if (!stageTables[code]) stageTables[code] = []
@@ -290,7 +329,11 @@
       .sort((a, b) => String(a.segment).localeCompare(String(b.segment)))
 
     const reproducible = reproItems.filter((x) => x.replay_cmd !== null || x.http.length > 0).length
-    const summary = {
+    /* [dsh-purge-plus] 以 scoreReport 的 summary 打底，再补报告专用字段：
+       safe 的 report.summary 就是计分汇总（count/withRequests/missingRequests/… 14 键），
+       我方过去只给报告字段（10 键），两边只有 points 交集。按 safe 写的模板读
+       summary.count 会拿到 undefined（R21-safe 审计 P1）。 */
+    const summary = Object.assign({}, base.summary || {}, {
       points: base.summary ? base.summary.points : 0,
       items: items.length,
       reproducible,
@@ -301,7 +344,7 @@
       internal_entries: internalEntry.length,
       data_proofs: proofs.length,
       data_proof_rows: proofs.reduce((n, p) => n + (Number(p.row_count) || 0), 0),
-    }
+    })
 
     /* ── 四、交付清单（清理台账）────────────────────────────────────── */
     let cleanup = { total: 0, open: 0, done: 0, wontfix: 0, items: [] }

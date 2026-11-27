@@ -12,6 +12,14 @@
   /** 记一条清理项。kind 必填、title 必填 —— 没有标题的清理项没人会去清。 */
   addCleanup(id, item = {}) {
     const db = this.db(id)
+    /* [dsh-purge-plus] 兼容 safe 的 `{ item: {…} }` 包装：safe 的调用约定是
+       `req.item || req`，按 safe 写的脚本/工具传进来是包了一层的。
+       过去直接把外层当 item，kind 是 undefined → 报「收到 undefined」，
+       而调用方看到的是「我明明给了 kind」（R21-safe 审计 P1）。 */
+    if (item !== null && typeof item === 'object' && !Array.isArray(item)
+      && item.item !== null && typeof item.item === 'object' && !Array.isArray(item.item)) {
+      item = item.item
+    }
     const kind = String(item.kind === undefined || item.kind === null ? '' : item.kind).trim()
     if (!RedteamStore.CLEANUP_KINDS.includes(kind)) {
       throw new Error('cleanup kind 只能是 ' + RedteamStore.CLEANUP_KINDS.join('/') + '，收到 ' + JSON.stringify(item.kind))
@@ -31,7 +39,7 @@
     const dup = (target === '' && location === '') ? undefined : db.prepare(
       "SELECT id FROM cleanup_item WHERE kind = ? AND COALESCE(target, '') = ? AND COALESCE(location, '') = ? AND status = 'open'")
       .get(kind, target, location)
-    if (dup) return { cleanup_id: Number(dup.id), deduped: true, dedup_key: kind + '|' + target + '|' + location }
+    if (dup) return { cleanup_id: Number(dup.id), deduped: true, dedup_key: kind + '|' + target + '|' + location, cleanup: db.prepare('SELECT * FROM cleanup_item WHERE id = ?').get(Number(dup.id)) }
     db.prepare('INSERT INTO cleanup_item(asset_id, target, kind, title, detail, evidence_ref, status, priority, created_by, created_at) ' +
       'VALUES(?,?,?,?,?,?,?,?,?,?)').run(
       item.asset_id === undefined || item.asset_id === null ? null : Number(item.asset_id),
@@ -43,7 +51,9 @@
       item.created_by === undefined ? null : item.created_by,
       nowIso())
     const newId = Number(db.prepare('SELECT last_insert_rowid() AS id').get().id)
-    return { cleanup_id: newId, deduped: false }
+    /* [dsh-purge-plus] add 与 update 的返回形状要能互相替代：调用方（工具层、面板）
+       拿到 add 的 {cleanup_id} 与 update 的 {cleanup} 时不该分两套解析。两个键都给。 */
+    return { cleanup_id: newId, deduped: false, cleanup: db.prepare('SELECT * FROM cleanup_item WHERE id = ?').get(newId) }
   }
 
   listCleanup(id, f = {}) {
@@ -104,15 +114,19 @@
       sets.push('status = ?'); args.push(st)
     }
     for (const f of ['detail', 'evidence_ref', 'priority', 'target', 'title', 'location']) {
-      if (Object.prototype.hasOwnProperty.call(patch, f)) {
-        sets.push(f + ' = ?'); args.push(patch[f] === undefined ? null : patch[f])
+      /* [dsh-purge-plus] `undefined` 表示"这次没给这个字段"，不是"把它清空"。
+         调用方（工具层与面板 dispatch）习惯把 6 个键一次性传进来，其中 5 个是 undefined，
+         hasOwnProperty 全部命中 → 只改 detail 也会把 target/title/priority 写成 NULL。
+         清空要用 null（显式），缺省用 undefined（跳过）。 */
+      if (Object.prototype.hasOwnProperty.call(patch, f) && patch[f] !== undefined) {
+        sets.push(f + ' = ?'); args.push(patch[f])
       }
     }
-    if (sets.length === 0) return { cleanup: row }
+    if (sets.length === 0) return { cleanup_id: Number(itemId), cleanup: row, unchanged: true }
     sets.push('updated_by = ?', 'updated_at = ?')
     args.push(actor === undefined ? null : actor, nowIso(), Number(itemId))
     db.prepare('UPDATE cleanup_item SET ' + sets.join(', ') + ' WHERE id = ?').run(...args)
-    return { cleanup: db.prepare('SELECT * FROM cleanup_item WHERE id = ?').get(Number(itemId)) }
+    return { cleanup_id: Number(itemId), cleanup: db.prepare('SELECT * FROM cleanup_item WHERE id = ?').get(Number(itemId)) }
   }
 
   /** 清理进度汇总：给报告尾部和首页用。 */

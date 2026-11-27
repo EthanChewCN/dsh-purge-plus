@@ -54,14 +54,14 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 ```
 基座   dsh-purge Community   MIT         宿主补丁 · 补丁引擎 · 运维层
 移植   dsh-purge safe        Apache-2.0  能力面更宽的一条支线
-结果   dsh-purge-plus        独立变体     95 条补丁 · 50 组只读验收
+结果   dsh-purge-plus        独立变体     96 条补丁 · 54 组只读验收
 ```
 
 本仓库**不是** community 的 fork，也**不是** safe 的 fork。它把两个上游都当作只读输入：
 
 - `vendor/community/` —— 基座，原样副本，构建时只读；
 - `vendor/safe/` —— 移植来源，原样副本，只用于比对；
-- `overlay/` —— 本仓库**全部**改动：新增文件 + **309 条锚点编辑**（`required` 306 / `required:false` 3）
+- `overlay/` —— 本仓库**全部**改动：新增文件 + **341 条锚点编辑**（`required` 338 / `required:false` 3）
   + **96 处 snippet 注入点** + 4 条品牌文案替换。改动面由 `verify [26]` 组现场复算守卫，
   文档数字与代码不符即验收失败。
 
@@ -79,9 +79,10 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 | 自有 #206 | `SUBAGENT_INHERIT_PARENT_ACCESS` —— 子代理原样继承父会话权限档 |
 | 自有 #207 | `BLANK_REUSE_KEEPS_RECORDED_PRESET` —— 复用空白会话时沿用日志里记下的预设（冷路径） |
 | 自有 #208 | `LIVE_BLANK_REUSE_KEEPS_RECORDED_PRESET` —— 活着的空白会话同样沿用（活路径） |
+| 自有 #209 | `HUNG_PROMPT_ACCEPTS_STRING_CONTRACT` —— 挂针同时认 function 与 string 两种契约，且非字符串返回值不再被 `String()` 糊成 `[object Object]` |
 | 自有模块 | `lib/subagent-fence.js` —— 子代理（叶子节点）不得再派活 |
 | 补丁引擎 | **30 个描述符字段**：`drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
-| 后端 op | **106 条**（两家上游并集 84 + 自有 22），UI 引用 68 条，全部可解析 |
+| 后端 op | **112 条**（两家上游并集 84 + 自有 24 + safe 2.0.2 兼容别名 4），UI 引用 68 条，全部可解析 |
 | 运维层 | 审计流水 `audit.jsonl`、跨进程维护锁、回滚事务、逐层自检、运行时探针、漂移检测 |
 | 在线升级 | 面板「检查更新」可用，匿名拉 GitHub 发行，逐字节核 `SHA256SUMS.txt` |
 | 演练台 | 左侧栏整页设置 + 红队事实库（SQLite），**14 个页签 / 6 个一级分组** |
@@ -171,7 +172,7 @@ shasum -a 256 -c SHA256SUMS.txt
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 50 组只读验收，不动宿主
+node scripts/verify.mjs     # 54 组只读验收，不动宿主
 ```
 
 然后同上：面板 → 插件 → 从文件安装 → 选 `dist/dsh-purge-plus-<ver>.tgz` → 重启 DSH。
@@ -255,9 +256,9 @@ git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
 | 阶段 | 动作 | 失败会怎样 |
 | :--- | :--- | :--- |
 | 换 vendor | 整目录替换 `vendor/community` | — |
-| 重放 overlay | 309 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
+| 重放 overlay | 341 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
 | 重建 | vendor + overlay → `dist/package` → tgz | 断言不符 → 中止 |
-| 验收 | 50 组只读检查 | 任一组红 → 非零退出 |
+| 验收 | 54 组只读检查 | 任一组红 → 非零退出 |
 
 锚点「恰好命中 N 次」是硬约束：命中 0 次 = 宿主升级后锚点烂了；命中 ≥2 次 = 会打歪。两种情况都直接失败。
 
@@ -271,7 +272,7 @@ git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
 node scripts/verify.mjs
 ```
 
-全部 50 组都写在 `scripts/verify.mjs` 里，下面只是**节选**（挑读者最可能踩的几条）：
+全部 54 组都写在 `scripts/verify.mjs` 里，下面只是**节选**（挑读者最可能踩的几条）：
 
 | # | 检查 | 失败意味着 |
 | :--- | :--- | :--- |
@@ -301,16 +302,16 @@ node scripts/verify.mjs
 vendor/community/          上游基座，原样副本，构建时只读
 vendor/safe/               移植来源，原样副本，只用于比对
 overlay/files/             新增文件（覆盖进产物）
-  ├─ lib/patches/overlay.mjs   自有补丁表 #201–#208
+  ├─ lib/patches/overlay.mjs   自有补丁表 #201–#209
   ├─ lib/subagent-fence.js     叶子节点围栏
   ├─ lib/redteam/              team-board-views.js 等移植模块
   ├─ skills/redteam/           技能库（40 个 .md）
   └─ NOTICE-PLUS.md            署名与逐文件改动记录
 overlay/snippets/          注入产物的长段代码（页签、图表、报告渲染…）
-overlay/edits.mjs          309 条锚点编辑清单
+overlay/edits.mjs          341 条锚点编辑清单
 overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         50 组只读验收
+scripts/verify.mjs         54 组只读验收
 scripts/check-rebuild.mjs  克隆重建一致性（发布前跑一次）
 scripts/test-*.mjs         38 个行为回归（被 verify [33] 汇总执行）
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → 本机 CVE 底库

@@ -151,6 +151,9 @@
           execFileSync('git', ['-C', dest, 'pull', '--ff-only'], { stdio: 'pipe', timeout: src.timeout_ms })
           const count = this.#countTemplates(dest)
           this.#intelLog({ key: 'nuclei', action: 'git-pull', dest: dest, templates: count })
+          /* 把「刷新过」记进 platform config：环境适配页读的就是这三个键。
+             不写的话，面板点完更新仍显示「从未刷新记录 / 0 个」（R21 审计 RB-04）。 */
+          this.#recordTemplatesRefresh(dest, count, '')
           return { key: 'nuclei', action: 'updated', mode: 'git-pull', dest: dest, templates: count }
         } catch (e) {
           /* git 失败就退回整包下载 —— 但要说清是哪种方式成功的 */
@@ -198,6 +201,7 @@
         if (moved) rmSync(backup, { recursive: true, force: true })
         const count = this.#countTemplates(dest)
         this.#intelLog({ key: 'nuclei', action: 'tar', dest: dest, bytes: got.bytes, templates: count })
+        this.#recordTemplatesRefresh(dest, count, '')
         return { key: 'nuclei', action: 'updated', mode: 'tar', dest: dest, bytes: got.bytes, templates: count }
       } finally {
         try { rmSync(stage, { recursive: true, force: true }) } catch { /* 清不掉只能留着，但要说清 */ }
@@ -205,8 +209,28 @@
     } catch (e) {
       const error = String((e && e.message) || e)
       this.#intelLog({ key: 'nuclei', action: 'failed', error: error })
+      this.#recordTemplatesRefresh('', 0, error)
       return { key: 'nuclei', action: 'failed', error: error, dest: dest }
     }
+  }
+
+  /**
+   * 把模板刷新结果写进 platform config（环境适配页读 templatesRefreshedAt/Count/Commit/LastError）。
+   * 失败时只记 last_error，不动计数与时间 —— 「上次成功是什么时候」不能被一次失败抹掉。
+   */
+  #recordTemplatesRefresh(dir, count, error) {
+    try {
+      if (error) {
+        savePlatformConfig({ templatesLastError: String(error) }, this.root)
+        return
+      }
+      savePlatformConfig({
+        templatesRefreshedAt: Date.now(),
+        templatesCount: Number(count) || 0,
+        templatesCommit: '',
+        templatesLastError: '',
+      }, this.root)
+    } catch { /* 配置写不进不该让一次成功的下载变成失败 */ }
   }
 
   /** 数模板：只看顶层 yaml 文件，且必须有 `id:` 行（排除 .github 里的 CI 配置）。 */

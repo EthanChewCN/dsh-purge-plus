@@ -66,8 +66,8 @@ try {
 
 // ── 2. 不变式 ───────────────────────────────────────────────────
 console.log("[2] 补丁表不变式");  // 结构
-r.total === 95 ? ok(`总数 ${r.total}`) : bad(`总数应为 95，实际 ${r.total}`);
-r.ours.length === 7 ? ok(`自有 ${r.ours.length} 条（≥201）`) : bad(`自有应为 7，实际 ${r.ours.length}`);
+r.total === 96 ? ok(`总数 ${r.total}`) : bad(`总数应为 96，实际 ${r.total}`);
+r.ours.length === 8 ? ok(`自有 ${r.ours.length} 条（≥201）`) : bad(`自有应为 8，实际 ${r.ours.length}`);
 r.dup.length === 0 ? ok("id 无重复") : bad(`id 重复: ${r.dup}`);
 r.fence === "function" ? ok("installSubagentFence 已导出") : bad(`围栏导出类型 ${r.fence}`);
 
@@ -1043,8 +1043,9 @@ console.log("\n[23] P20/P21 报告文档视图 · 会话关系图 · 字段级�
 
   /* 23.10 审计 R-03：location 全链（op → 工具 → 报告列） */
   /* addCleanup 直传；updateCleanup 走白名单循环（B1 的写法），所以要查白名单里有没有它 */
-  /location: req\.location/.test(core)
-    && /for \(const f of \['status', 'detail', 'evidence_ref', 'priority', 'target', 'title', 'location'\]\)/.test(core)
+  /* R21：addCleanup 分发层改为「req.item || req」后键名是 src.location —— 两者都算转发 */
+  /location: (req|src)\.location/.test(core)
+    && /for \(const [fk] of \['status', 'detail', 'evidence_ref', 'priority', 'target', 'title', 'location'\]\)/.test(core)
     ? ok("op：addCleanup / updateCleanup 都转发 location")
     : bad("op：location 没转发（写了也永远是 NULL）");
   /location: \{ type: 'string', description: 'add：具体位置/.test(toolsSrc)
@@ -1229,12 +1230,12 @@ if (!IN_REPO) {
   upIds.length === 88
     ? ok(`上游补丁 ${upIds.length} 条（1–96，缺号 ${missing.length} 个：${missing.join(",")}）`)
     : bad(`上游补丁应为 88 条，实际 ${upIds.length}（缺号 ${missing.join(",")}）`);
-  ownIds.length === 7
+  ownIds.length === 8
     ? ok(`自有补丁 ${ownIds.length} 条（${ownIds.join(",")}）`)
-    : bad(`自有补丁应为 7 条，实际 ${ownIds.length}`);
-  allIds.length === 95
-    ? ok(`合计 ${allIds.length} 条（88 + 7）`)
-    : bad(`合计应为 95，实际 ${allIds.length}`);
+    : bad(`自有补丁应为 8 条，实际 ${ownIds.length}`);
+  allIds.length === 96
+    ? ok(`合计 ${allIds.length} 条（88 + 8）`)
+    : bad(`合计应为 96，实际 ${allIds.length}`);
   new Set(allIds).size === allIds.length
     ? ok("id 无重复")
     : bad("id 有重复");
@@ -2559,6 +2560,328 @@ console.log("[50] R11–R15 审计缺陷回归");  // 回归 test-r11-fixes.mjs,
     }
   }
   console.log(`     四条脚本合计 ${total} 条断言，覆盖 ${TABLE.length} 条审计缺陷`);
+}
+
+// 审计 R19 的两条教训：
+//   ① 写侧不做类型归一 —— 一个字符串就让报告页永久崩（(scope||[]).join 抛 TypeError），
+//      一个对象就被 String() 成 "[object Object]"，授权范围永久丢失且没有 op 能改回来；
+//   ② 门禁只测 dispatch 不测工具层 —— cleanup 的 NULL 写入在 dispatch 修好之后又活了一轮。
+// 这里把「更新类写 op 查不到必须报错」做成**从 WRITE_OPS 现扫**的动态断言：
+// 上游以后新增 updateXxx 忘了守规矩，这一组立刻红，不需要有人记得回来加用例。
+console.log("[51] R19 写侧类型归一 / 工具与分发等价");  // 回归 test-r19-fixes.mjs
+{
+  const coreSrc51 = fs.readFileSync(path.join(PKG, "lib/redteam", "store-core.js"), "utf8");
+  const setBody = /const WRITE_OPS = new Set\(\[([\s\S]*?)\]\)/.exec(coreSrc51);
+  const writeOps51 = setBody ? [...setBody[1].matchAll(/'([A-Za-z0-9]+)'/g)].map((x) => x[1]) : [];
+  const updateOps51 = writeOps51.filter((n) => /^update/.test(n));
+  if (updateOps51.length < 3) bad(`WRITE_OPS 里只扫到 ${updateOps51.length} 个更新类 op（应 ≥3）`);
+  else ok(`WRITE_OPS 现扫到 ${updateOps51.length} 个更新类 op：${updateOps51.join(" / ")}`);
+
+  const tmpRoot51 = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-purge-r19-"));
+  try {
+    const { RedteamStore, dispatch } = await import(path.join(PKG, "lib/redteam", "store-core.js"));
+    const store51 = new RedteamStore(tmpRoot51);
+    const eng51 = store51.openEngagement("r19-gate", undefined, { bindCurrent: false });
+
+    /* ① 更新类 op：查不到的 id 不许回 ok:true（否则调用方以为改成功了） */
+    const silent51 = [];
+    for (const op of updateOps51) {
+      const res = dispatch(store51, { op, engagement: eng51.id, id: 99999 });
+      if (res && res.ok === true) silent51.push(`${op} → ${JSON.stringify(res).slice(0, 90)}`);
+    }
+    silent51.length === 0
+      ? ok(`${updateOps51.length} 个更新类 op 对不存在的 id 一律 ok:false（不再假成功）`)
+      : bad(`更新类 op 假成功：${silent51.join(" · ")}`);
+
+    /* ② scope 写侧归一：对象要被拒绝（否则永久丢失），字符串要被切开（否则报告崩） */
+    const objScope51 = dispatch(store51, { op: "openEngagement", name: "r19-obj", scope: [{ cidr: "10.0.0.0/8" }] });
+    objScope51.ok === false && /scope/.test(String(objScope51.error || ""))
+      ? ok("openEngagement 传对象 scope → ok:false 且指名 scope（不再存成 [object Object]）")
+      : bad(`openEngagement 传对象 scope 得到 ${JSON.stringify(objScope51).slice(0, 120)}`);
+    !fs.existsSync(path.join(tmpRoot51, "engagements", "r19-obj"))
+      ? ok("被拒绝的 scope 没在磁盘上留下半截靶标目录")
+      : bad("非法 scope 仍在磁盘上留下了目录");
+
+    const strScope51 = dispatch(store51, { op: "openEngagement", name: "r19-str", scope: "10.0.0.0/8, 192.168.0.0/16" });
+    const strScopeArr = strScope51.engagement && strScope51.engagement.scope;
+    Array.isArray(strScopeArr) && strScopeArr.length === 2
+      ? ok("openEngagement 传字符串 scope → 归一成数组（报告 .join 不会再崩）")
+      : bad(`openEngagement 传字符串 scope 得到 ${JSON.stringify(strScope51).slice(0, 120)}`);
+
+    const rep51 = dispatch(store51, { op: "report", engagement: strScope51.engagement.id });
+    /授权范围：10\.0\.0\.0\/8, 192\.168\.0\.0\/16/.test(rep51.markdown || "")
+      ? ok("字符串 scope 的靶标能出报告，两个网段都在")
+      : bad("字符串 scope 的靶标报告里没有网段");
+
+    /* ③ 两条路径等价：同一次部分更新，store 直调与 dispatch 落库结果必须逐字段相同。
+       这正是 cleanup NULL 写入能活两轮的原因 —— 两条路径当时确实不一样。 */
+    const a51 = store51.openEngagement("r19-a", undefined, { bindCurrent: false });
+    const b51 = store51.openEngagement("r19-b", undefined, { bindCurrent: false });
+    const seed51 = { target: "x.example.com", location: "/p", kind: "account", title: "T", detail: "D", priority: "high" };
+    const ia51 = store51.addCleanup(a51.id, seed51).cleanup_id;
+    const ib51 = store51.addCleanup(b51.id, seed51).cleanup_id;
+    const viaStore51 = store51.updateCleanup(a51.id, ia51, { detail: "D2" }).cleanup;
+    const viaDispatch51 = dispatch(store51, { op: "updateCleanup", engagement: b51.id, id: ib51, detail: "D2" }).cleanup;
+    const pick51 = (r) => JSON.stringify([r && r.target, r && r.location, r && r.kind, r && r.title, r && r.priority, r && r.status, r && r.detail]);
+    pick51(viaStore51) === pick51(viaDispatch51)
+      ? ok("同一次部分更新：store 直调与 dispatch 落库结果逐字段相同")
+      : bad(`两条路径结果不同：${pick51(viaStore51)} vs ${pick51(viaDispatch51)}`);
+    viaDispatch51 && viaDispatch51.target === "x.example.com" && viaDispatch51.priority === "high"
+      ? ok("部分更新没有把没给的字段抹成 NULL（target/priority 都在）")
+      : bad(`部分更新抹掉了字段：${pick51(viaDispatch51)}`);
+  } catch (e) {
+    bad(`R19 运行时探测抛错：${String((e && e.message) || e)}`);
+  } finally {
+    try { fs.rmSync(tmpRoot51, { recursive: true, force: true }) } catch { /* 忽略 */ }
+  }
+}
+
+console.log("[52] R20 空载荷 / 空壳 / 类型污染 / 返回形状");  // 回归 test-r20-fixes.mjs
+{
+  const tmpRoot52 = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-purge-r20-"));
+  try {
+    const { RedteamStore, dispatch } = await import(path.join(PKG, "lib/redteam", "store-core.js"));
+    const s52 = new RedteamStore(tmpRoot52);
+    const e52 = s52.openEngagement("r20-gate", undefined, { bindCurrent: false });
+    const d52 = (body) => dispatch(s52, Object.assign({ engagement: e52.id }, body));
+
+    /* ① 空载荷一律不许落行：这五条以前都返回 ok:true 并写进一条不可用记录 */
+    const empty52 = [
+      ["addVuln", {}],
+      ["addHttpEvidence", {}],
+      ["addChainStep", { stage: "recon" }],
+      ["addTunnel", { kind: "socks5" }],
+      ["addDataProof", { row_count: 1, fields: { a: 1 } }],
+    ];
+    const leaked52 = empty52.filter(([op, body]) => {
+      const r = d52(Object.assign({ op }, body));
+      return !r || r.ok !== false;
+    }).map(([op]) => op);
+    leaked52.length === 0
+      ? ok(`5 类空载荷全部 ok:false（${empty52.map(([o]) => o).join(" / ")}）`)
+      : bad(`空载荷仍然假成功：${leaked52.join(" / ")}`);
+
+    /* ② 空壳阶段会永久阻断内置定义补种 */
+    s52.db(e52.id).prepare("DELETE FROM stage").run();
+    d52({ op: "saveStage", code: "internet" });
+    const st52 = s52.listStages(e52.id).find((x) => x.code === "internet");
+    Array.isArray(st52 && st52.sections) && st52.sections.length >= 3 && st52.name !== "internet"
+      ? ok("只给 code 的 saveStage 不会留下空壳阶段（内置定义完整补种）")
+      : bad(`internet 阶段被写成空壳：${JSON.stringify(st52 && { name: st52.name, sections: st52.sections })}`);
+    const badSec52 = d52({ op: "saveStage", code: "recon", sections: "x" });
+    badSec52.ok === false ? ok("saveStage 的 sections 传字符串被拒（攻击链页面不会崩）") : bad("sections 传字符串仍然入库");
+
+    /* ③ 类型污染：对象/字符串被 String() 成 "[object Object]" 或静默归 0 */
+    const promptBefore52 = d52({ op: "prompts" }).roles.find((x) => x.role === "recon").content;
+    d52({ op: "savePrompt", role: "recon", content: { a: 1 } });
+    const promptAfter52 = d52({ op: "prompts" }).roles.find((x) => x.role === "recon").content;
+    promptAfter52 === promptBefore52 && !/\[object Object\]/.test(promptAfter52)
+      ? ok("savePrompt 收对象 → 提示词一个字节没动")
+      : bad("savePrompt 收对象仍然写坏了提示词");
+    const sp52 = d52({ op: "saveScorePoint", name: "门禁点", points: "abc" });
+    sp52.ok === false ? ok("saveScorePoint 的 points:\"abc\" 被拒（不再静默归 0）") : bad("points 非数字仍然被接受");
+
+    /* ④ 导入：{bundle:{…}} 不许零入库却 ok:true */
+    const imp52 = d52({ op: "import", bundle: {} });
+    imp52.ok === false ? ok("空 bundle → ok:false（不再零入库报成功）") : bad("空 bundle 仍然 ok:true");
+
+    /* ⑤ 契约：intelStatus 两个数要自洽；intelRefresh 要说清「没下载」 */
+    const intel52 = s52.intelStatus();
+    intel52.stale_count === intel52.resources.filter((r) => r.stale === true).length
+      ? ok("intelStatus：stale_count 与 resources[].stale 口径一致")
+      : bad(`intelStatus 自相矛盾：count=${intel52.stale_count} 字段=${intel52.resources.filter((r) => r.stale).length}`);
+    const rf52 = s52.intelRefresh();
+    rf52.probe_only === true && rf52.downloaded === false
+      ? ok("intelRefresh 标注 probe_only / downloaded:false（不再与 safe 同名反义）")
+      : bad("intelRefresh 仍然没说明是否真的下载");
+
+    /* ⑥ 报错指向正确的对象：写错 action 时不该说「需要 asset_id」 */
+    const cov52 = d52({ op: "assetCoverage", action: "zzz" });
+    /未知 action/.test(String(cov52.error || ""))
+      ? ok("assetCoverage 写错 action → 报「未知 action」而不是「需要 asset_id」")
+      : bad(`assetCoverage 报错指错对象：${JSON.stringify(cov52).slice(0, 100)}`);
+
+    /* ⑦ add / update 返回同一组键；部分更新不抹字段 */
+    const add52 = d52({ op: "addCleanup", kind: "webshell", title: "T", target: "10.0.0.9", location: "/a.jsp" });
+    const upd52 = d52({ op: "updateCleanup", id: add52.cleanup_id, status: "done", detail: "已删" });
+    add52.cleanup_id > 0 && upd52.cleanup_id === add52.cleanup_id && upd52.cleanup && upd52.cleanup.target === "10.0.0.9"
+      ? ok("cleanup add/update 都返回 cleanup_id + cleanup，且只改状态不抹 target")
+      : bad(`cleanup 返回形状或字段不一致：${JSON.stringify([add52, upd52]).slice(0, 160)}`);
+
+    /* ⑧ 端口要带 provenance：否则「扫出来的」与「被动看到的」无法区分 */
+    d52({ op: "import", bundle: { assets: [{ ip: "10.6.6.6", ports: [{ port: 443, banner: "nginx", provenance: "active" }] }] } });
+    const assets52 = s52.listAssets(e52.id);
+    const a52 = (Array.isArray(assets52) ? assets52 : assets52.items || []).find((x) => x.ip === "10.6.6.6");
+    const p52 = a52 ? s52.getAssetCoverage(e52.id, a52.id).asset.ports[0] : null;
+    p52 && p52.provenance === "active" && p52.banner === "nginx"
+      ? ok("getAssetCoverage().asset.ports 带 provenance / banner")
+      : bad(`端口字段缺失：${JSON.stringify(p52)}`);
+  } catch (e) {
+    bad(`R20 运行时探测抛错：${String((e && e.message) || e)}`);
+  } finally {
+    try { fs.rmSync(tmpRoot52, { recursive: true, force: true }) } catch { /* 忽略 */ }
+  }
+}
+
+console.log("[53] R21 五条功能面对等（报告 / 模板键 / 计数 / 名额 / 会话图）");  // 回归 test-r21-features.mjs
+{
+  const tmpRoot53 = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-purge-r21-"));
+  /* 配置与靶标库必须分两个根：上面写进 templatesCount 之后，
+     intelStatus 会优先用「刷新过的计数」，把磁盘实测值盖掉 —— 那是正确行为，
+     但会让这一组测不到磁盘计数。 */
+  const tmpRoot53b = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-purge-r21b-"));
+  try {
+    const { RedteamStore } = await import(path.join(PKG, "lib/redteam", "store-core.js"));
+    const platform53 = await import(path.join(PKG, "lib/redteam", "platform-config.js"));
+    const live53 = await import(path.join(PKG, "lib/redteam", "live-views.js"));
+
+    /* ① scoreReport 默认带 report（safe 恒带），且与 reportV2 同分 */
+    const s53 = new RedteamStore(tmpRoot53b);
+    const e53 = s53.openEngagement("r21-gate", "10.0.0.0/8", { bindCurrent: false });
+    const rep53 = s53.scoreReport(e53.id);
+    const v2_53 = s53.reportV2(e53.id);
+    rep53.report && rep53.report.summary && rep53.report.summary.points === v2_53.summary.points
+      ? ok("scoreReport 默认带 report，且总分与 reportV2 一致")
+      : bad(`scoreReport 的 report 缺失或总分不一致：${JSON.stringify(rep53.report && rep53.report.summary)}`);
+
+    /* ② 4 个 templates* 默认键存在且能落盘 */
+    const cfg53 = platform53.platformSummary(tmpRoot53).config || {};
+    const four53 = ["templatesRefreshedAt", "templatesCommit", "templatesCount", "templatesLastError"];
+    const miss53 = four53.filter((k) => !(k in cfg53));
+    miss53.length === 0
+      ? ok("platformConfigGet().config 带 4 个 templates* 默认键")
+      : bad(`templates* 默认键缺失：${miss53.join(" / ")}`);
+    platform53.savePlatformConfig({ templatesCount: 14481, templatesCommit: "abc1234" }, tmpRoot53);
+    const back53 = platform53.loadPlatformConfig(tmpRoot53);
+    back53.templatesCount === 14481 && back53.templatesCommit === "abc1234"
+      ? ok("templates* 写入后能读回（刷新完计数不会停在 0）")
+      : bad(`templates* 落盘失败：${JSON.stringify({ c: back53.templatesCount, m: back53.templatesCommit })}`);
+
+    /* ③ intelStatus 的两段计数摘要 */
+    const dir53 = path.join(tmpRoot53b, "toolkit", "nuclei-templates");
+    fs.mkdirSync(dir53, { recursive: true });
+    fs.writeFileSync(path.join(dir53, "a.yaml"), "id: a\n");
+    fs.writeFileSync(path.join(dir53, "b.yml"), "id: b\n");
+    fs.mkdirSync(path.join(tmpRoot53b, "intel"), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot53b, "intel", "kev.json"),
+      JSON.stringify({ dateReleased: new Date().toISOString(), vulnerabilities: [{ cveID: "CVE-2021-44228" }] }));
+    const intel53 = s53.intelStatus();
+    intel53.templates && intel53.templates.count === 2 && intel53.templates.owned === true
+      ? ok("intelStatus.templates 计数正确且认出插件自己那份")
+      : bad(`templates 摘要不对：${JSON.stringify(intel53.templates)}`);
+    intel53.kev && intel53.kev.count === 1 && intel53.kev.available === true
+      ? ok("intelStatus.kev 条目数与可用性正确")
+      : bad(`kev 摘要不对：${JSON.stringify(intel53.kev)}`);
+
+    /* ④ 名额：挂起的让出名额，且与工具层同判据 */
+    const kids53 = [
+      { id: "a", parent: "r", activity: "running" },
+      { id: "b", parent: "r", activity: "running" },
+      { id: "c", parent: "r", activity: "idle" },
+    ];
+    const split53 = live53.splitRunningParked(kids53, (p, id) => id === "b");
+    split53.running.length === 1 && split53.parked.length === 1
+      ? ok("waiting/blocked 的智能体不计入 used（面板与工具层同口径）")
+      : bad(`名额拆分不对：${JSON.stringify(split53)}`);
+
+    /* ⑤ 会话图：子代理树 + 活动态 + 封顶时主干优先 */
+    const base53 = { engagements: [], sessions: [{ id: "s1", engagement: "e1" }, { id: "s2", engagement: "e1" }] };
+    const list53 = [
+      { id: "s1", header: { activity: "running" } },
+      { id: "s2", header: { activity: "idle" } },
+      { id: "k1", header: { activity: "running", parentSession: "s1" } },
+    ];
+    const merged53 = live53.mergeSessionGraphLive(base53, list53);
+    merged53.sessions.length === 3 && merged53.sessions.find((x) => x.id === "k1").parent === "s1"
+      ? ok("子代理并进图里且父子关系正确")
+      : bad(`子代理没进图：${JSON.stringify(merged53.sessions.map((x) => x.id))}`);
+    merged53.activity_counts.running === 2 && merged53.activity_counts.idle === 1
+      ? ok("活动态计数正确")
+      : bad(`活动态计数不对：${JSON.stringify(merged53.activity_counts)}`);
+    const many53 = [];
+    for (let i = 0; i < 400; i += 1) many53.push({ id: "k" + i, header: { activity: "running", parentSession: "s1" } });
+    const capped53 = live53.mergeSessionGraphLive(base53, list53.concat(many53));
+    capped53.sessions.length === 300 && capped53.sessions[0].id === "s1" && capped53.sessions[1].id === "s2"
+      ? ok("封顶 300 时绑定会话仍排在最前（主干不被枝叶挤掉）")
+      : bad(`封顶顺序不对：${capped53.sessions.slice(0, 3).map((x) => x.id).join(",")} / ${capped53.sessions.length}`);
+  } catch (e) {
+    bad(`R21 运行时探测抛错：${String((e && e.message) || e)}`);
+  } finally {
+    try { fs.rmSync(tmpRoot53, { recursive: true, force: true }) } catch { /* 忽略 */ }
+    try { fs.rmSync(tmpRoot53b, { recursive: true, force: true }) } catch { /* 忽略 */ }
+  }
+}
+
+console.log("[54] R22 safe 2.0.2 op 名兼容 + team-mode 接线 + 挂针契约");  // 回归 test-r22-alias.mjs
+{
+  const tmp54 = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-purge-r22-"));
+  const home54 = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-purge-r22h-"));
+  const prevHome54 = process.env.DSH_HOME;
+  try {
+    const { dispatch, dispatchAsync, RedteamStore } = await import(path.join(PKG, "lib/redteam", "store-core.js"));
+    const store54 = new RedteamStore(tmp54);
+
+    /* ① 四个别名必须被 dispatch 认出。
+       判据不是「返回 ok」，是**不能是 unknown op** —— 那正是补之前的状态。 */
+    const alias54 = ["cveSearch", "cveLookup", "templateCatalogStatus"];
+    const unknown54 = alias54.filter((op) => /unknown op/i.test(String((dispatch(store54, { op }) || {}).error || "")));
+    unknown54.length === 0
+      ? ok("cveSearch / cveLookup / templateCatalogStatus 都已被 dispatch 认出")
+      : bad(`这三个 op 仍是 unknown op：${unknown54.join(" / ")}`);
+
+    /* 空库时必须说清「库不在」，不能只回一个空数组让人以为没命中 */
+    const s54 = dispatch(store54, { op: "cveSearch", q: "log4j" });
+    typeof s54.note === "string" && s54.note.length > 0 && s54.status && s54.status.available === false
+      ? ok("空库 cveSearch 带 status.available=false 且附 note 说明原因")
+      : bad(`空库 cveSearch 没说清原因：${JSON.stringify({ note: s54.note, status: s54.status })}`);
+
+    /* ② intelSync 没配数据源：skipped + note，不能像同步过了 */
+    process.env.DSH_HOME = home54;
+    const base54 = process.env.REDTEAM_INTEL_BASE;
+    delete process.env.REDTEAM_INTEL_BASE;
+    const sync54 = await dispatchAsync(store54, { op: "intelSync" });
+    if (base54 !== undefined) process.env.REDTEAM_INTEL_BASE = base54;
+    sync54.result && sync54.result.action === "skipped" && /没有联网/.test(String(sync54.note || ""))
+      ? ok("intelSync 无数据源 → action=skipped 且明说没联网没落盘")
+      : bad(`intelSync 无数据源时没说清：${JSON.stringify(sync54)}`);
+
+    /* ③ team-mode 真的被接线层装上（审计曾误判「零调用方」） */
+    const caps54 = await import(path.join(PKG, "lib/plus-capabilities.js"));
+    const ctx54 = { on: () => () => {}, get: () => undefined, effect() {}, logger: { info() {}, warn() {} } };
+    const rep54 = caps54.installPlusCapabilities(ctx54, {});
+    Array.isArray(rep54.installed) && rep54.installed.includes("team-mode")
+      ? ok("installPlusCapabilities 把 team-mode 记进 installed（接线不是零调用方）")
+      : bad(`能力接线层没装上 team-mode：${JSON.stringify(rep54)}`);
+
+    /* ④ #209：挂针同时认 function 与 string，且非字符串返回值不再被 String() 糊掉 */
+    /* 直接 import 补丁表：探针 JSON 只带 id/name/layer 这些字段，
+       chainedAfter 与 replacements 不在里面。 */
+    const overlay54 = await import(path.join(PKG, "lib/patches", "overlay.mjs"));
+    const p209 = (overlay54.OVERLAY_PATCHES || []).find((x) => x.id === 209);
+    p209 && p209.chainedAfter === 88
+      ? ok("#209 挂在 #88 之后（锚点是 88 的产物）")
+      : bad(`#209 缺失或未声明 chainedAfter：${JSON.stringify(p209 && p209.chainedAfter)}`);
+    const src209 = p209 && p209.replacements && p209.replacements[0] ? p209.replacements[0].replace : "";
+    const run209 = (g) => {
+      const body = src209.replace(/\/\*[\s\S]*?\*\//g, "");
+      try { return new Function("globalThis", body + "\nreturn dshPurgeHung;")(g); } catch { return "<throw>"; }
+    };
+    const g54 = {};
+    const cases54 = [
+      [(() => { g54.__dshPurgeHungPrompt = () => "FN"; return run209(g54); })(), "FN", "function 契约"],
+      [(() => { g54.__dshPurgeHungPrompt = "  STR  "; return run209(g54); })(), "STR", "string 契约"],
+      [(() => { g54.__dshPurgeHungPrompt = 42; return run209(g54); })(), "", "数字"],
+      [(() => { g54.__dshPurgeHungPrompt = () => ({}); return run209(g54); })(), "", "函数返回对象"],
+    ];
+    const wrong54 = cases54.filter(([got, want]) => got !== want);
+    wrong54.length === 0
+      ? ok("#209 求值：function / string 都取到正文，数字与对象被丢弃")
+      : bad(`#209 求值不符：${JSON.stringify(wrong54)}`);
+  } finally {
+    if (prevHome54 === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome54;
+    try { fs.rmSync(tmp54, { recursive: true, force: true }) } catch { /* 忽略 */ }
+    try { fs.rmSync(home54, { recursive: true, force: true }) } catch { /* 忽略 */ }
+  }
 }
 
 console.log("");

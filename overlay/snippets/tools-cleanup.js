@@ -44,11 +44,19 @@
           return JSON.stringify(Object.assign({ ok: true, engagement: t.id }, out), null, 2)
         }
         if (action === 'update') {
-          const out = store.updateCleanup(t.id, args && args.id, {
-            status: args && args.status, detail: args && args.detail,
-            evidence_ref: args && args.evidence_ref, priority: args && args.priority,
-            target: args && args.target, title: args && args.title,
-          }, exec && exec.agentId)
+          /* [dsh-purge-plus] 只传真的给了的字段：一次性塞 6 个键、其中 5 个 undefined，
+             曾经让"只改 detail"把 target/title/priority 写成 NULL（报告收尾段唯一数据源）。 */
+          if (args === undefined || args === null || args.id === undefined || args.id === null) {
+            return JSON.stringify({ ok: false, error: 'action=update 需要 id（先 action=list 看实际 id）' }, null, 2)
+          }
+          const patch = {}
+          for (const k of ['status', 'detail', 'evidence_ref', 'priority', 'target', 'title']) {
+            if (args[k] !== undefined) patch[k] = args[k]
+          }
+          if (Object.keys(patch).length === 0) {
+            return JSON.stringify({ ok: false, error: 'action=update 至少要给一个要改的字段（status/detail/evidence_ref/priority/target/title）' }, null, 2)
+          }
+          const out = store.updateCleanup(t.id, args.id, patch, exec && exec.agentId)
           return JSON.stringify(Object.assign({ ok: true, engagement: t.id }, out), null, 2)
         }
         return JSON.stringify({ ok: false, error: '未知 action：' + action + '（list/add/update）' }, null, 2)

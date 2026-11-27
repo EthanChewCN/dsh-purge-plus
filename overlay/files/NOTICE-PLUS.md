@@ -88,7 +88,30 @@
 | `lib/net-scope.js` 的 `installRegionGate`（`net-scope.js:625-669`） | 反向能力：命中地域/银行判定就往会话写 `DENIAL` 并吞掉整轮，与本项目目的相反 |
 | `lib/update.js` | `const REPO = ""`（`update.js:12`），升级通道整体失效；本仓库用 community 的更新子系统 |
 | 16 个 `.css` | **不是死资产**：`scripts/build-client.mjs:62-66` 把它们逐个读进 `PURGE_CSS` 常量并嵌入 safe 的 client.js。不移植的真实原因是样式体系与 DOM 结构不同（community 面板没有对应的类名与层级），搬过来是零命中的样式表 |
-| `#89/#90/#91` | 与宿主契约冲突：`#89` 把系统提示词塞进无人读取的 `request.system` 字段；`#90/#91` 读 string 型 `globalThis.__dshPurgeHungPrompt`，而本基座定义的是 function 型，打上即静默失效 |
+| `#89/#90/#91` | 见下方专节：`#89` 在本基座上是空操作，`#90/#91` 的注入已被 `#88` 覆盖、其附加替换与本包注入格式冲突。只把它们的**契约宽容**（string/function 双认）取过来，落在本仓库的 `#209` |
+
+### 未移植 safe `#89/#90/#91`（provider 系统角色）—— 逐条核过
+
+三条的目的都是「让注入的正文进到 provider 的原生 system 槽，而不是被当成对话历史」。
+在本基座上这个目的**已经达成**，且达成方式与 safe 不同，所以搬过来不是补强而是重复。
+
+| safe 补丁 | 它解决的问题 | 本基座的现状 | 结论 |
+|---|---|---|---|
+| `#89` `SYSTEM_FIELD_EXTRACT` | `buildRequest` 把 `role:system` 消息提到独立的 `request.system` 字段 | 宿主 `dsh-llm-pi-ai` 的 `splitSystemPrompt()`（`lib/index.js:1290-1301`）**已经**把 `options.system` 与**开头连续的** system 消息合并进 `systemPrompt`，再交给 provider 原生槽。surface 投影里系统提示只有一条（`systemPrompt.project(renderedPrompt, {inHistory:false})` 是替换而非追加），所以 #89 在本基座上是恒等变换 | 不移植 |
+| `#90` `OPENAI_NATIVE_SYSTEM_ROLE` | 读 `globalThis.__dshPurgeHungPrompt`（**string**）塞进 `messages[0].role=system` | 本基座 `#87/#88` 在 `agent-loop` 一步一处把同一份正文前置进 `renderedPrompt`，随后照常进 `systemPrompt` → 原生槽。实测 `dsh-purge-desktop.log` 每步都有 `[host.hungFn] tier=refresh bytes=…`，子会话侧累计 1500 条 `sub=true` 注入记录 | 不移植 |
+| `#91` `ANTHROPIC_NATIVE_PARAMS_SYSTEM` | 同上，塞进 `params.system` | 同 #90：走的是同一条 `systemPrompt` 通道 | 不移植 |
+
+两条**附加替换**还有反向作用，不能照搬：
+
+- `#90` 的第 4 条替换在把系统消息写进 provider 参数时执行
+  `.replace(/<\/?project_instructions>/gi, "")` —— 本包的注入正文以
+  `<project_instructions>` 分段，删掉它等于把结构标记抹平。
+- `#90/#91` 的注入判据是「前 96 字符已存在就跳过」。本基座的 `#88` 用的是
+  「头 80 + 尾 96 都在才算挂住」，两者判据不同，同时打会在提示词里糊成两份。
+
+**取过来的那一半**：它们的**契约宽容**。safe 写/读 string，本基座写 function；
+只认一种会让另一方的挂针静默消失（没有报错，只是注入不见了）。
+本仓库用 `#209` 把同一行改成 string/function 双认，语义是严格超集。
 
 ## 3. 上游的第三方内容（随 community 继承）
 

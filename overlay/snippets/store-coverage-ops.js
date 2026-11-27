@@ -34,6 +34,12 @@
       const action = String(req.action || 'get').trim()
       try {
         if (action === 'next') return Object.assign({ ok: true, engagement: gid }, store.assetNextActions(gid, { limit: req.limit }))
+        /* [dsh-purge-plus] action 白名单要在 asset_id 守卫之前：写错 action 时
+           「zzz 需要 asset_id」会把人往「你没给 asset_id」上带，而真正的原因是
+           action 拼错了 —— 那句「未知 action」的提示永远显示不出来。 */
+        if (!['get', 'update', 'close', 'next'].includes(action)) {
+          return { ok: false, error: '未知 action：' + action + '（get/update/close/next）' }
+        }
         if (req.asset_id === undefined || req.asset_id === null) return { ok: false, error: action + ' 需要 asset_id' }
         if (action === 'get') return { ok: true, engagement: gid, coverage: store.getAssetCoverage(gid, req.asset_id) }
         if (action === 'update') {
@@ -59,6 +65,10 @@
       const action = String(req.action || 'get').trim()
       try {
         if (action === 'next') return Object.assign({ ok: true, engagement: gid }, store.hostNextActions(gid, { limit: req.limit }))
+        /* 同 assetCoverage：先认 action，再要求 asset_id */
+        if (!['get', 'update', 'close', 'next'].includes(action)) {
+          return { ok: false, error: '未知 action：' + action + '（get/update/close/next）' }
+        }
         if (req.asset_id === undefined || req.asset_id === null) return { ok: false, error: action + ' 需要 asset_id' }
         if (action === 'get') return { ok: true, engagement: gid, coverage: store.getHostCoverage(gid, req.asset_id) }
         if (action === 'update') {

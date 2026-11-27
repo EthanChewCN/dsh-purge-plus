@@ -5,7 +5,7 @@
 //   · vendor/ 永远不被写入（只在构建时读取），升级时整目录替换即可。
 //   · overlay 的改动面（计数方法学见 docs/02）：
 //       - 新增文件：overlay/files/** + overlay/snippets/**
-//       - 锚点编辑：overlay/edits.mjs **309 条**（required 306 / required:false 3）
+//       - 锚点编辑：overlay/edits.mjs **341 条**（required 338 / required:false 3）
 //       - snippet 注入点：§3c **92 处**（两份产物各一遍）
 //       - 品牌文案替换：§3b 4 条；页签修正：§3d
 //     这三个数字由 verify [26] 组现场复算守卫（连这条注释里的数字一起查：
@@ -1484,8 +1484,8 @@ try {
 }
 const r = JSON.parse(probeOut);
 if (r.dup.length) die(`补丁 id 重复: ${r.dup.join(",")}`);
-if (r.ours !== 7) die(`自有补丁数应为 7，实际 ${r.ours}`);
-if (r.total !== 88 + 7) die(`补丁总数应为 95，实际 ${r.total}`);
+if (r.ours !== 8) die(`自有补丁数应为 8，实际 ${r.ours}`);
+if (r.total !== 88 + 8) die(`补丁总数应为 96，实际 ${r.total}`);
 if (r.upstreamMax !== 96) die(`上游补丁最大 id 应为 96，实际 ${r.upstreamMax}（基座可能变了，需复核 PORT-MATRIX）`);
 log(`✓ 补丁表 ${r.total} 条（上游 ${r.total - r.ours}，最大 id ${r.upstreamMax} + 自有 ${r.ours} 条 ≥201），id 无重复`);
 

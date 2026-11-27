@@ -32,14 +32,28 @@
     return db.prepare('SELECT * FROM ' + table + ' WHERE asset_id = ?').get(Number(assetId))
   }
 
-  /** 某资产上登记过的开放端口（带服务名），覆盖度队列用来提示「还差哪些面」。 */
+  /**
+   * 某资产上登记过的开放端口（带服务名），覆盖度队列用来提示「还差哪些面」。
+   *
+   * [dsh-purge-plus] 这里曾经是一个裸 `catch { return [] }`：列不存在、表被改坏、
+   * SQL 写错，全部退化成「这台资产没有开放端口」—— 调用方看到的是「没数据」，
+   * 而不是「读失败」。现在只对「老库缺列」这一种情况降级，其余照原样抛。
+   * 同时把 safe 的 port 字段补齐（provenance / banner），否则归属证明里
+   * 「这个端口是扫出来的还是被动观测到的」无从判断。
+   */
   #covPortsOf(db, assetId, limit = 20) {
+    const run = (cols) => db.prepare(
+      'SELECT ' + cols + ' '
+      + 'FROM port p LEFT JOIN service s ON s.port_id = p.id '
+      + "WHERE p.asset_id = ? AND p.state = 'open' ORDER BY p.port ASC LIMIT ?").all(Number(assetId), Number(limit))
     try {
-      return db.prepare(
-        'SELECT p.port, p.proto, p.state, p.url, p.title, s.name AS service, s.product, s.version ' +
-        'FROM port p LEFT JOIN service s ON s.port_id = p.id ' +
-        "WHERE p.asset_id = ? AND p.state = 'open' ORDER BY p.port ASC LIMIT ?").all(Number(assetId), Number(limit))
-    } catch { return [] }
+      return run('p.port, p.proto, p.state, p.provenance, p.banner, p.url, p.title, s.name AS service, s.product, s.version')
+    } catch (e) {
+      const msg = String((e && e.message) || e)
+      if (!/no such column|no such table/i.test(msg)) throw e
+      /* 老库没有 provenance/banner 列：退回不带这两列的查询，端口本身仍然可用 */
+      return run('p.port, p.proto, p.state, p.url, p.title, s.name AS service, s.product, s.version')
+    }
   }
 
   /* ── 外部资产：surface / web / auth / cve / app ───────────────── */

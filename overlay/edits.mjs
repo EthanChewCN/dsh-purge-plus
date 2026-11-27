@@ -755,7 +755,18 @@ export function buildEdits(repo = resolveRepo()) {
         "      /* engagement 为空 = 解绑（面板上的「不再跟随」） */\n" +
         "      if (!req.engagement) return { ok: store.clearSessionBinding(sid), session: sid, bound: null }\n" +
         "      const written = store.setSessionBinding(sid, req.engagement, req.name)\n" +
-        "      return { ok: written, session: sid, bound: written ? req.engagement : null }\n" +
+        "      /* [dsh-purge-plus] 写失败必须说清原因：旧返回 {ok:false, bound:null} 没有 error 字段，\n" +
+        "         面板只能显示「失败」，而真正的原因是靶标不存在（或绑定表写不进去）。 */\n" +
+        "      if (!written) {\n" +
+        "        const known = store.listEngagements().some((e) => e.id === req.engagement)\n" +
+        "        return {\n" +
+        "          ok: false, session: sid, bound: null,\n" +
+        "          error: known\n" +
+        "            ? '绑定写入失败：' + String(req.engagement) + ' 存在，但 sessions.json 写不进去（检查磁盘权限）'\n" +
+        "            : 'engagement not found: ' + String(req.engagement),\n" +
+        "        }\n" +
+        "      }\n" +
+        "      return { ok: true, session: sid, bound: req.engagement }\n" +
         "    }",
     },
     // 工具侧的显式绑定也要落盘，否则智能体绑完、面板还是不知道。
@@ -856,12 +867,10 @@ export function buildEdits(repo = resolveRepo()) {
       file: "lib/redteam/store-core.js",
       required: true,
       find:
-        "      const written = store.setSessionBinding(sid, req.engagement, req.name)\n" +
-        "      return { ok: written, session: sid, bound: written ? req.engagement : null }\n" +
+        "      return { ok: true, session: sid, bound: req.engagement }\n" +
         "    }",
       replace:
-        "      const written = store.setSessionBinding(sid, req.engagement, req.name)\n" +
-        "      return { ok: written, session: sid, bound: written ? req.engagement : null }\n" +
+        "      return { ok: true, session: sid, bound: req.engagement }\n" +
         "    }\n" +
         SNIP("store-attention-ops.js"),
     },
@@ -1165,6 +1174,15 @@ export function buildEdits(repo = resolveRepo()) {
         "      return Object.assign({ ok: true, engagement: ackId }, ackOut, store.attentionQueue(ackId, { limit: req.limit }))\n" +
         "    }\n" +
         SNIP("store-intel-ops.js"),
+    },
+    {
+      /* R22：safe 2.0.2 的三个只读 op 名。能力早就在（redteam_cve 工具的三个 action
+         调的就是同一批函数），缺的只是同名 op —— 外部自动化按 safe 的名字调会拿到
+         unknown op，看起来像「少了 CVE 检索」。 */
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "\n    /* ---------- [dsh-purge-plus] P9 清理清单 op ---------- */",
+      replace: "\n" + SNIP("store-safe-alias-ops.js") + "\n    /* ---------- [dsh-purge-plus] P9 清理清单 op ---------- */",
     },
     {
       file: "lib/redteam/tools.js",
@@ -2056,34 +2074,11 @@ export function buildEdits(repo = resolveRepo()) {
     // ══ Q. 社区版审计（AUDIT-COMMUNITY.md）四项 ══════════════════════
 
     // ── B1（高）`updateCleanup` 把没传的字段静默写成 NULL ────────────
-    // 分发处无条件塞 6 个键（`status: req.status` 等），store 侧用
-    // `hasOwnProperty` 判「这个字段要改」——于是 undefined 也命中，
-    // 落库变成 NULL。只改 detail 时还会因为 status:undefined 校验失败而报错。
-    // 后果：target 清空 → addCleanup 的去重键失效 → 重复项；报告收尾段丢字段。
-    {
-      file: "lib/redteam/store-core.js",
-      required: true,
-      find:
-        "        if (op === 'updateCleanup') {\n" +
-        "          if (req.id === undefined || req.id === null) return { ok: false, error: 'updateCleanup 需要 id' }\n" +
-        "          return Object.assign({ ok: true, engagement: cid }, store.updateCleanup(cid, req.id, {\n" +
-        "            status: req.status, detail: req.detail, evidence_ref: req.evidence_ref,\n" +
-        "            priority: req.priority, target: req.target, title: req.title, location: req.location,\n" +
-        "          }, req.actor))\n" +
-        "        }",
-      replace:
-        "        if (op === 'updateCleanup') {\n" +
-        "          if (req.id === undefined || req.id === null) return { ok: false, error: 'updateCleanup 需要 id' }\n" +
-        "          /* [dsh-purge-plus] 只传调用方**真的给过**的字段。store 用 hasOwnProperty\n" +
-        "             判「要不要改」，无条件塞 undefined 会把 target/title/detail/priority\n" +
-        "             静默写成 NULL（target 一空，addCleanup 的去重键就失效了）。 */\n" +
-        "          const patch = {}\n" +
-        "          for (const f of ['status', 'detail', 'evidence_ref', 'priority', 'target', 'title', 'location']) {\n" +
-        "            if (req[f] !== undefined) patch[f] = req[f]\n" +
-        "          }\n" +
-        "          return Object.assign({ ok: true, engagement: cid }, store.updateCleanup(cid, req.id, patch, req.actor))\n" +
-        "        }",
-    },
+    // R19 起改在源头修：`overlay/snippets/store-cleanup-ops.js` 只把调用方真的给过的
+    // 字段交给 store，`overlay/snippets/store-cleanup.js` 把 undefined 当「没给」。
+    // 原先在这里用文本补丁重写同一段逻辑 —— 源头一改锚点就失配，而且补丁只该补
+    // 上游 vendor，不该回头改写自己的片段。
+
     // ── B2（中）离线时版本历史被过滤光，回滚目标消失 ────────────────
     // `fork.rows` 拿不到（断网/限流）就是空数组，于是「不在 fork 列表里就丢」
     // 把本机装过的历史版本全删了——而那正是唯一还能回滚的目标。
@@ -2286,16 +2281,16 @@ export function buildEdits(repo = resolveRepo()) {
     },
 
     // M5. 会话关系图：op（与 sessionBindings 同段，全局）
+    // 锚点是上一条编辑**插入后**的尾部：绑定失败分支已带 error 字段，
+    // 这里只负责把会话图 op 接到它后面。
     {
       file: "lib/redteam/store-core.js",
       required: true,
       find:
-        "      const written = store.setSessionBinding(sid, req.engagement, req.name)\n" +
-        "      return { ok: written, session: sid, bound: written ? req.engagement : null }\n" +
+        "      return { ok: true, session: sid, bound: req.engagement }\n" +
         "    }",
       replace:
-        "      const written = store.setSessionBinding(sid, req.engagement, req.name)\n" +
-        "      return { ok: written, session: sid, bound: written ? req.engagement : null }\n" +
+        "      return { ok: true, session: sid, bound: req.engagement }\n" +
         "    }\n" +
         SNIP("store-session-graph-ops.js"),
     },
@@ -2377,8 +2372,8 @@ export function buildEdits(repo = resolveRepo()) {
     {
       file: "lib/redteam/store-core.js",
       required: true,
-      find: "  /** 重新探一遍并记录检查时间。不下载、不联网、不改任何资源文件。 */",
-      replace: SNIP("store-intel-net.js") + "\n  /** 重新探一遍并记录检查时间。不下载、不联网、不改任何资源文件。 */",
+      find: "  intelRefresh() {\n",
+      replace: SNIP("store-intel-net.js") + "\n  intelRefresh() {\n",
     },
 
     // ══ P23. 删除靶标（Q5）═══════════════════════════════════════
@@ -2922,6 +2917,64 @@ export function buildEdits(repo = resolveRepo()) {
         "  }\n" +
         "  const mergedById = new Map((Array.isArray(mergedRows) ? mergedRows : []).map((row) => [String(row.id), row]))\n",
     },
+    // 并发名额：面板与工具层必须共用同一份「挂起」状态
+    //   slot-state.js 的注释写着「工具层写、面板层读，两边共用一个 Map 才不会出现
+    //   『工具说还有名额、面板说满了』」—— 但我们只移植了工具层那一半，
+    //   ui.js 从没 import isParked，于是 blocked/waiting 的智能体照样占名额。
+    // 并发名额：子会话记录必须带 id，否则挂起判定恒假
+    //   slot-state 的键是子会话 id，而这里过去只 push 了 parent/label/activity/mode。
+    //   isParked(parent, undefined) → String(undefined) → 永远查不到 → parked 恒 0，
+    //   于是「waiting/blocked 让出名额」这整段逻辑一行都没生效（R21 审计 RB-01）。
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "          if (k && k.kind === 'child') children.push({ parent: String(root.id), label: k.label || String(k.id), activity: k.activity, mode: k.mode })\n",
+      replace:
+        "          if (k && k.kind === 'child') children.push({ id: String(k.id), parent: String(root.id), label: k.label || String(k.id), activity: k.activity, mode: k.mode })\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find: "import { maxAgentsOf, maxAgentsSourceOf, saveMaxAgents, DEFAULT_MAX_AGENTS, MAX_AGENTS_LIMIT } from './settings.js'\n",
+      replace:
+        "import { maxAgentsOf, maxAgentsSourceOf, saveMaxAgents, DEFAULT_MAX_AGENTS, MAX_AGENTS_LIMIT } from './settings.js'\n" +
+        "/* [dsh-purge-plus] 与工具层同一份挂起状态：回报 waiting/blocked 的执行智能体已让出名额，\n" +
+        "   面板不能再把它们算进 used，否则工具说「还有名额」、面板说「满了」。 */\n" +
+        "import { isParked } from './slot-state.js'\n" +
+        "/* [dsh-purge-plus] 会话图 / 并发名额的判定逻辑（纯函数，可单独测）。 */\n" +
+        "import { mergeSessionGraphLive, splitRunningParked } from './live-views.js'\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "  const running = children.filter((c) => c.activity === 'running')\n" +
+        "  return {\n" +
+        "    ok: true, max, used: running.length, free: Math.max(max - running.length, 0),\n" +
+        "    running: running.slice(0, 20), total_children: children.length,\n" +
+        "    source: maxAgentsSourceOf(root, process.env),\n" +
+        "    limit: MAX_AGENTS_LIMIT,\n" +
+        "    default_max: DEFAULT_MAX_AGENTS,\n" +
+        "    note: '同一会话（靶标）同时最多 ' + max + ' 个执行智能体；默认顺序派活。',\n" +
+        "  }\n",
+      replace:
+        "  /* [dsh-purge-plus] 挂起的（在等人给 key / VPS / 范围）只显示，不占名额 ——\n" +
+        "     与 tools.js 的 runningAll.filter(!isParked) 同一判据。 */\n" +
+        "  const split = splitRunningParked(children, isParked)\n" +
+        "  const runningRows = split.running.map((c) => ({ parent: c.parent, label: c.label, activity: c.activity, mode: c.mode }))\n" +
+        "  const parkedRows = split.parked.map((c) => ({ parent: c.parent, label: c.label, activity: c.activity, mode: c.mode }))\n" +
+        "  return {\n" +
+        "    ok: true, max, used: runningRows.length, free: Math.max(max - runningRows.length, 0),\n" +
+        "    running: runningRows.slice(0, 20), total_children: children.length,\n" +
+        "    parked: parkedRows.length, parked_labels: parkedRows.map((p) => p.label).slice(0, 20),\n" +
+        "    source: maxAgentsSourceOf(root, process.env),\n" +
+        "    limit: MAX_AGENTS_LIMIT,\n" +
+        "    default_max: DEFAULT_MAX_AGENTS,\n" +
+        "    note: '同一会话（靶标）同时最多 ' + max + ' 个执行智能体；默认顺序派活。'\n" +
+        "      + (parkedRows.length ? '（另有 ' + parkedRows.length + ' 个在等人给资源，已让出名额）' : ''),\n" +
+        "  }\n",
+    },
     {
       file: "lib/redteam/ui.js",
       required: true,
@@ -3042,7 +3095,11 @@ export function buildEdits(repo = resolveRepo()) {
         "import { EvidenceLedger, UnknownRegistry } from './evidence-ledger.mjs'\n" +
         "/* [dsh-purge-plus] CVE 底库远端同步（safe 2.0.2 intel-sync.js）：清单 → sha256 →\n" +
         "   解压校验 → 原子顶替。与 store-intel-net（KEV / nuclei 模板）不是同一件事。 */\n" +
-        "import { intelSyncStatus, syncIntel } from './intel-sync.js'\n",
+        "import { intelSyncStatus, syncIntel } from './intel-sync.js'\n" +
+        "/* [dsh-purge-plus] R22：safe 2.0.2 的三个只读 op 名（cveSearch / cveLookup /\n" +
+        "   templateCatalogStatus）直接复用底库读取层。cve-db.js 本来就已被 intel-sync.js\n" +
+        "   载入，这里只是把符号拿到本文件可见，不增加任何 IO。 */\n" +
+        "import { cveDbStatus, lookupCve, searchCve, templateCatalogStatus } from './cve-db.js'\n",
     },
     {
       file: "lib/redteam/store-core.js",
@@ -3322,6 +3379,7 @@ export function buildEdits(repo = resolveRepo()) {
       required: true,
       find: "  return dispatch(store, req)\n}",
       replace:
+        SNIP("store-safe-alias-async.js") +
         "  /* [dsh-purge-plus] 代理池：要真连 TCP 的 4 个 op。同步 dispatch 里做不了网络等待，\n" +
         "     所以放异步路径；失败一律 ok:false + 原因，不返回「已连接」。 */\n" +
         "  if (req.op === 'proxyProfileTest') {\n" +
@@ -3908,6 +3966,55 @@ export function buildEdits(repo = resolveRepo()) {
       file: "lib/redteam/platform-config.js",
       required: true,
       find:
+        "  /* 用户在环境适配里保存/文件夹分配过一次 */\n" +
+        "  envAdaptConfigured: false,\n",
+      replace:
+        "  /* [dsh-purge-plus] 模板保鲜的四个键必须是**默认值的一部分**，不能只在用户刷新过\n" +
+        "     之后才出现。safe 的 EMPTY() 就带这四个键，于是 platformConfigGet().config 的\n" +
+        "     键集是稳定的；我们缺了它们，按 safe 写的调用方（读 cfg.templatesCount）在新机器上\n" +
+        "     拿到 undefined，环境适配页只能显示「未安装」而不是「0 个」。\n" +
+        "     只做提示与节流，不参与任何判定 —— 读不到就是 0，不影响开工。 */\n" +
+        "  templatesRefreshedAt: 0,\n" +
+        "  templatesCommit: '',\n" +
+        "  templatesCount: 0,\n" +
+        "  templatesLastError: '',\n" +
+        "  /* 用户在环境适配里保存/文件夹分配过一次 */\n" +
+        "  envAdaptConfigured: false,\n",
+    },
+    {
+      file: "lib/redteam/platform-config.js",
+      required: true,
+      find:
+        "    envAdaptConfigured: patch.envAdaptConfigured !== undefined\n" +
+        "      ? !!patch.envAdaptConfigured\n" +
+        "      : !!prev.envAdaptConfigured,\n" +
+        "    updated_at: new Date().toISOString(),\n",
+      replace:
+        "    envAdaptConfigured: patch.envAdaptConfigured !== undefined\n" +
+        "      ? !!patch.envAdaptConfigured\n" +
+        "      : !!prev.envAdaptConfigured,\n" +
+        "    /* [dsh-purge-plus] 模板保鲜四个键必须**显式**写进来。\n" +
+        "       它们现在是 EMPTY() 的默认键，于是 save 的「表外键兜底」循环里\n" +
+        "       `!(k in next)` 恒假（next 继承自 prev 已有该键），patch 里的新值\n" +
+        "       永远落不了盘 —— 刷新完模板，计数仍是 0。 */\n" +
+        "    templatesRefreshedAt: patch.templatesRefreshedAt === undefined\n" +
+        "      ? (Number(prev.templatesRefreshedAt) || 0)\n" +
+        "      : (Number(patch.templatesRefreshedAt) || 0),\n" +
+        "    templatesCount: patch.templatesCount === undefined\n" +
+        "      ? (Number(prev.templatesCount) || 0)\n" +
+        "      : (Number(patch.templatesCount) || 0),\n" +
+        "    templatesCommit: patch.templatesCommit === undefined\n" +
+        "      ? String(prev.templatesCommit || '')\n" +
+        "      : String(patch.templatesCommit || ''),\n" +
+        "    templatesLastError: patch.templatesLastError === undefined\n" +
+        "      ? String(prev.templatesLastError || '')\n" +
+        "      : String(patch.templatesLastError || ''),\n" +
+        "    updated_at: new Date().toISOString(),\n",
+    },
+    {
+      file: "lib/redteam/platform-config.js",
+      required: true,
+      find:
         "    updated_at: new Date().toISOString(),\n" +
         "  }\n",
       replace:
@@ -3918,7 +4025,13 @@ export function buildEdits(repo = resolveRepo()) {
         "  for (const [k, v] of Object.entries(patch && typeof patch === 'object' ? patch : {})) {\n" +
         "    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue\n" +
         "    if (!(k in next)) next[k] = v\n" +
-        "  }\n",
+        "  }\n" +
+        "  /* [dsh-purge-plus] 元字段不进配置文件：path / exists / error 是 load 时给调用方\n" +
+        "     看的，不是配置。它们随 prev 一起被 Object.assign 带进来，于是每次保存都把\n" +
+        "     「上次那条错误」写回磁盘 —— 清不掉，且下次 load 又原样读回来（R21 审计 RB-08）。 */\n" +
+        "  delete next.path\n" +
+        "  delete next.exists\n" +
+        "  delete next.error\n",
     },
     {
       file: "lib/redteam/schema.js",
@@ -4583,6 +4696,431 @@ export function buildEdits(repo = resolveRepo()) {
         "\"CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id DESC LIMIT ?\").all(...args, limit)\n",
       replace:
         "\"CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id DESC LIMIT ? OFFSET ?\").all(...args, limit, offset)\n",
+    },
+
+    /* ==================== R19：范围类型 / 写 op 存在性 / 读路径副作用 ==================== */
+    // 归一函数放模块级：写侧一处校验，读侧六处共用（见 scope-normalize.js 头注释）。
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "export function dispatch(store, req = {}) {",
+      replace: SNIP("scope-normalize.js") + "export function dispatch(store, req = {}) {",
+    },
+    // 先验类型再落盘：非法 scope 不能留下半截目录（R19-02 的修复顺序）
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  openEngagement(name, scope, options = {}) {\n" +
+        "    const id = slugify(name)\n" +
+        "    mkdirSync(this.dirOf(id), { recursive: true })\n",
+      replace:
+        "  openEngagement(name, scope, options = {}) {\n" +
+        "    /* [dsh-purge-plus] 先验类型再建目录：非法 scope 不该留下半截靶标目录 */\n" +
+        "    const nextScope = normalizeScope(scope)\n" +
+        "    const id = slugify(name)\n" +
+        "    mkdirSync(this.dirOf(id), { recursive: true })\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const existing = readMeta(this.metaPathOf(id))\n" +
+        "    writeMeta(this.metaPathOf(id), {\n" +
+        "      target_name: name,\n" +
+        "      scope_cidrs: scope || (existing && existing.scope_cidrs) || [],\n",
+      replace:
+        "    const existing = readMeta(this.metaPathOf(id))\n" +
+        "    /* [dsh-purge-plus] 写侧归一：字符串按逗号/空白切成 CIDR 列表，数组里出现非字符串直接拒绝。\n" +
+        "       归一之前：字符串被原样写进 YAML → report 的 .join 抛 TypeError（报告页永久崩）；\n" +
+        "       对象被 String() 成 \"[object Object]\" → 授权范围永久丢失，且当时没有任何 op 能改回来。\n" +
+        "       没给 scope（undefined/null）时沿用库里的旧值，但旧值也要过一遍读侧还原。 */\n" +
+        "    const effectiveScope = nextScope !== null ? nextScope : scopeList(existing && existing.scope_cidrs)\n" +
+        "    writeMeta(this.metaPathOf(id), {\n" +
+        "      target_name: name,\n" +
+        "      scope_cidrs: effectiveScope,\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "    return { id, name, scope: scope || [] }\n",
+      replace: "    return { id, name, scope: effectiveScope }\n",
+    },
+    // 读侧六处：历史脏数据不再让报告抛错、也不再被当成「没记范围」
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "        scope: meta.scope_cidrs || [], status: meta.status || 'active',\n",
+      replace: "        scope: scopeList(meta.scope_cidrs), status: meta.status || 'active',\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "        id, name: meta.target_name || id, scope: meta.scope_cidrs || [],\n",
+      replace: "        id, name: meta.target_name || id, scope: scopeList(meta.scope_cidrs),\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "      engagement: { id, name: meta.target_name || id, scope: meta.scope_cidrs || [] },\n",
+      replace: "      engagement: { id, name: meta.target_name || id, scope: scopeList(meta.scope_cidrs) },\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "    push(`- 授权范围：${(meta.scope_cidrs || []).join(', ') || '（未记录）'}`)\n",
+      replace: "    push(`- 授权范围：${scopeList(meta.scope_cidrs).join(', ') || '（未记录）'}`)\n",
+    },
+    // R19-03：写 op 对不存在的 id 不能再假成功
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    const current = db.prepare('SELECT * FROM vuln WHERE id = ?').get(Number(vulnId))\n" +
+        "    if (current === undefined) return { updated: false }\n",
+      replace:
+        "    const current = db.prepare('SELECT * FROM vuln WHERE id = ?').get(Number(vulnId))\n" +
+        "    /* [dsh-purge-plus] 查不到就是查不到：曾经 return {updated:false}，dispatch 用\n" +
+        "       Object.assign({ok:true}, …) 一包就变成「成功但没改」，与 pocGet 的假成功同形。\n" +
+        "       抛错后 dispatch 归一成 {ok:false,error}，工具层归一成 bad_input 并提示先 list。 */\n" +
+        "    if (current === undefined) throw new Error('vuln not found: ' + vulnId)\n",
+    },
+    // 幽灵靶标：只读 op 不能在磁盘上造目录
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  listPrompts(id) {\n" +
+        "    const dir = this.promptsDirOf(id)\n" +
+        "    mkdirSync(dir, { recursive: true })\n" +
+        "    this.refreshDefaultPrompts(id)\n",
+      replace:
+        "  listPrompts(id, options = {}) {\n" +
+        "    const dir = this.promptsDirOf(id)\n" +
+        "    /* [dsh-purge-plus] 读路径不落盘：`prompts` 是只读 op，却会 mkdir + 灌 6 份默认提示词，\n" +
+        "       于是「查一个不存在的靶标的提示词」会在磁盘上造出一个幽灵靶标。\n" +
+        "       materialize:false 时目录不存在就只回内置默认值，一个字节都不写。 */\n" +
+        "    const materialize = options.materialize !== false\n" +
+        "    if (materialize) {\n" +
+        "      mkdirSync(dir, { recursive: true })\n" +
+        "      this.refreshDefaultPrompts(id)\n" +
+        "    }\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "        content: exists ? readFileSync(p, 'utf8') : '',\n" +
+        "        updated_at: exists ? statSync(p).mtime.toISOString() : null,\n",
+      replace:
+        "        content: exists ? readFileSync(p, 'utf8') : (materialize ? '' : (DEFAULT_PROMPTS[role] || '')),\n" +
+        "        updated_at: exists ? statSync(p).mtime.toISOString() : null,\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "    if (op === 'prompts') return { ok: true, roles: store.listPrompts(id) }\n",
+      replace: "    if (op === 'prompts') return { ok: true, roles: store.listPrompts(id, { materialize: false }) }\n",
+    },
+    {
+      file: "lib/redteam/tools.js",
+      required: true,
+      find: "      const found = store.listPrompts(id).find((p) => p.role === args.role)\n",
+      replace: "      const found = store.listPrompts(id, { materialize: false }).find((p) => p.role === args.role)\n",
+    },
+    // 模板索引：`^\s*id:` 会命中 .github/workflows 里缩进的 step id
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "        if (!/^\\s*id:\\s*\\S+/m.test(full)) continue\n",
+      replace: "        if (!/^id:\\s*\\S+/m.test(full)) continue\n",
+    },
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "          && Number(cached.v || 0) === 3 /* [dsh-purge-plus] 过滤规则变了要重建 */\n",
+      replace: "          && Number(cached.v || 0) === 4 /* [dsh-purge-plus] 过滤规则变了要重建 */\n",
+    },
+
+    /* ==================== R20：空载荷 / 空壳 / 假成功 / 类型污染 ==================== */
+    // R19-04：空载荷不再落一条 title=NULL 的漏洞行
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  addVuln(id, v = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    const severity = SEVERITIES.includes(v.severity) ? v.severity : 'info'\n",
+      replace:
+        "  addVuln(id, v = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    /* [dsh-purge-plus] 空载荷会落一条 title=NULL 的漏洞行：它被 vulnStats / 报告 /\n" +
+        "       覆盖率一起数进去，报告里只能显示「(无标题)」，既不能复现也不能处置。\n" +
+        "       至少要有 title 或 cve —— 两者都没有的调用一定是参数拼错了。 */\n" +
+        "    if (String(v.title ?? '').trim() === '' && String(v.cve ?? '').trim() === '') {\n" +
+        "      throw new Error('vuln 至少需要 title 或 cve：空载荷会落一条没有标题的漏洞行，污染漏洞表与统计')\n" +
+        "    }\n" +
+        "    const severity = SEVERITIES.includes(v.severity) ? v.severity : 'info'\n",
+    },
+    // R19-06 / R19-14：空壳阶段会永久阻断内置定义补种；sections 非数组会让攻击链页崩
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  saveStage(id, patch = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    if (!patch.code) throw new Error('stage.code required')\n" +
+        "    const cur = db.prepare('SELECT * FROM stage WHERE code = ?').get(String(patch.code))\n",
+      replace:
+        "  saveStage(id, patch = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    if (!patch.code) throw new Error('stage.code required')\n" +
+        "    /* [dsh-purge-plus] sections 必须是数组：写成字符串会被 JSON.stringify 成 \"x\"，\n" +
+        "       listStages 原样返回字符串，redteam_attack_chain 的 (st.sections||[]).map 直接崩。 */\n" +
+        "    if (patch.sections !== undefined && !Array.isArray(patch.sections)) {\n" +
+        "      throw new TypeError('stage.sections 必须是数组，收到 ' + (typeof patch.sections)\n" +
+        "        + '（写字符串会让攻击链页面与工具一起崩）')\n" +
+        "    }\n" +
+        "    /* [dsh-purge-plus] 空壳阶段会永久阻断补种：seedStages 只看 code 在不在，\n" +
+        "       先插一条 name=code / sections=[] 的行，内置定义（互联网资产权限 / 3 段手段 /\n" +
+        "       工具 / 过渡语）就再也不会补回来。所以库里没有这个 code 时先补种，再判断。 */\n" +
+        "    if (db.prepare('SELECT code FROM stage WHERE code = ?').get(String(patch.code)) === undefined) {\n" +
+        "      this.seedStages(id)\n" +
+        "    }\n" +
+        "    const cur = db.prepare('SELECT * FROM stage WHERE code = ?').get(String(patch.code))\n" +
+        "    if (cur === undefined && patch.sections === undefined) {\n" +
+        "      throw new Error('stage 不存在且没给 sections：这会插入一个空壳阶段并阻止内置定义补种（内置 code：'\n" +
+        "        + DEFAULT_STAGES.map((s) => s.code).join('/') + '）')\n" +
+        "    }\n",
+    },
+    // R19-13：角色提示词被写成 "[object Object]" 还返回 ok:true
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    mkdirSync(this.promptsDirOf(id), { recursive: true })\n" +
+        "    const text = String(content ?? '')\n",
+      replace:
+        "    /* [dsh-purge-plus] 非字符串 content 曾被 String() 写成 \"[object Object]\"（15 字节），\n" +
+        "       还会因为「与默认不一致」被从 manifest 删掉 → 此后永不随版本升级，而返回 ok:true。\n" +
+        "       角色提示词是给智能体的指令，写坏了整轮行为都歪，所以必须拒绝。 */\n" +
+        "    if (typeof content !== 'string') {\n" +
+        "      throw new TypeError('prompt content 必须是字符串，收到 '\n" +
+        "        + (content === null ? 'null' : typeof content))\n" +
+        "    }\n" +
+        "    mkdirSync(this.promptsDirOf(id), { recursive: true })\n" +
+        "    const text = content\n",
+    },
+    // R19-15：points:"abc" 被静默归 0 并返回 ok:true（更新自建得分点）
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "      if (name === '') throw new Error('score point name required')\n" +
+        "      const points = Number.isFinite(Number(point.points)) ? Number(point.points) : 0\n" +
+        "      db.prepare(`UPDATE score_point SET name = ?, category = ?, points = ?, description = ?, enabled = ?,\n",
+      replace:
+        "      if (name === '') throw new Error('score point name required')\n" +
+        "      /* [dsh-purge-plus] 给了 points 但不是数字时必须拒绝：旧行为静默归 0 并回 ok:true，\n" +
+        "         调用方以为写了分值，报告里这一条却是 0 分。 */\n" +
+        "      if (point.points !== undefined && point.points !== null && !Number.isFinite(Number(point.points))) {\n" +
+        "        throw new TypeError('score point points 必须是数字，收到 ' + JSON.stringify(point.points))\n" +
+        "      }\n" +
+        "      const points = Number.isFinite(Number(point.points)) ? Number(point.points) : 0\n" +
+        "      db.prepare(`UPDATE score_point SET name = ?, category = ?, points = ?, description = ?, enabled = ?,\n",
+    },
+    // R19-15：同上（新增自建得分点）
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "    if (name === '') throw new Error('score point name required')\n" +
+        "    const points = Number.isFinite(Number(point.points)) ? Number(point.points) : 0\n" +
+        "    const next = db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM score_point').get().n\n",
+      replace:
+        "    if (name === '') throw new Error('score point name required')\n" +
+        "    if (point.points !== undefined && point.points !== null && !Number.isFinite(Number(point.points))) {\n" +
+        "      throw new TypeError('score point points 必须是数字，收到 ' + JSON.stringify(point.points))\n" +
+        "    }\n" +
+        "    const points = Number.isFinite(Number(point.points)) ? Number(point.points) : 0\n" +
+        "    const next = db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM score_point').get().n\n",
+    },
+    // R19-11：HTTP 证据空载荷
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  addHttpEvidence(id, e = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    const result = db.prepare(`INSERT INTO http_evidence(vuln_id, asset_id, label, method, url, status, request, response, note, captured_by, captured_at)\n",
+      replace:
+        "  addHttpEvidence(id, e = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    /* [dsh-purge-plus] 没有 url / 报文 / 标签的「证据」不能入库：\n" +
+        "       报告里它会显示成一行空白，验收时既不能重放也不能说明任何事。 */\n" +
+        "    if ([e.url, e.request, e.response, e.label].every((x) => String(x ?? '').trim() === '')) {\n" +
+        "      throw new Error('http 证据至少要给 url / request / response / label 之一')\n" +
+        "    }\n" +
+        "    const result = db.prepare(`INSERT INTO http_evidence(vuln_id, asset_id, label, method, url, status, request, response, note, captured_by, captured_at)\n",
+    },
+    // R19-11：攻击链空载荷
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  addChainStep(id, s = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    const next = (db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM attack_step').get() || { n: 1 }).n\n",
+      replace:
+        "  addChainStep(id, s = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    /* [dsh-purge-plus] 没有标题的步骤在报告里就是一条空行 —— 攻击链的意义正是\n" +
+        "       「这一步做了什么」，title 缺失时整条记录不可读。 */\n" +
+        "    if (String(s.title ?? '').trim() === '') {\n" +
+        "      throw new Error('attack step 需要 title：报告按它展示「这一步做了什么」')\n" +
+        "    }\n" +
+        "    const next = (db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM attack_step').get() || { n: 1 }).n\n",
+    },
+    // R19-11：隧道空载荷
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find:
+        "  addTunnel(id, t = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    const ts = nowIso()\n",
+      replace:
+        "  addTunnel(id, t = {}) {\n" +
+        "    const db = this.db(id)\n" +
+        "    /* [dsh-purge-plus] 既没有监听地址、也没有入口/可达网段/建立命令的「隧道」\n" +
+        "       在扫描器侧无法使用、在报告里无法复现，只会在边界突破统计里占一行。 */\n" +
+        "    if ([t.listen, t.entry, t.reach, t.command].every((x) => String(x ?? '').trim() === '')) {\n" +
+        "      throw new Error('tunnel 至少要给 listen / entry / reach / command 之一')\n" +
+        "    }\n" +
+        "    const ts = nowIso()\n",
+    },
+    // R19-08：import 把整个 req 当 bundle → 传 {bundle:{…}} 时零入库却 ok:true
+    {
+      file: "lib/redteam/store-core.js",
+      required: true,
+      find: "    if (op === 'import') return Object.assign({ ok: true }, store.importBundle(id, req))\n",
+      replace:
+        "    if (op === 'import') {\n" +
+        "      /* [dsh-purge-plus] 兼容 {bundle:{…}}：旧实现把整个 req 当 bundle，于是\n" +
+        "         按直觉传 bundle 的调用方 counts 全 0、一条没入库，还拿到 ok:true。 */\n" +
+        "      const explicit = req.bundle && typeof req.bundle === 'object' && !Array.isArray(req.bundle)\n" +
+        "      const imported = store.importBundle(id, explicit ? req.bundle : req)\n" +
+        "      const total = Object.values(imported.counts || {}).reduce((a, b) => a + Number(b || 0), 0)\n" +
+        "      if (explicit && total === 0) {\n" +
+        "        return {\n" +
+        "          ok: false, counts: imported.counts,\n" +
+        "          error: 'import 没有导入任何记录：bundle 里 segments/assets/edges 都是空的（检查键名与嵌套层级）',\n" +
+        "        }\n" +
+        "      }\n" +
+        "      return Object.assign({ ok: true }, imported)\n" +
+        "    }\n",
+    },
+    // R19-09：顶部靶标下拉切换失败时界面已换、服务端指针没换
+    {
+      file: "lib/redteam/client.js",
+      required: true,
+      find:
+        "              setEng(e.target.value)\n" +
+        "              loadSnapshot(e.target.value)\n" +
+        "              /* 同步「当前靶标」：原生 skill 目录按它解析技能根 */\n" +
+        "              api({ op: 'activateEngagement', engagement: e.target.value }).catch(() => {})\n",
+      replace:
+        "              /* [dsh-purge-plus] 切换失败必须回滚：旧写法先改界面再 .catch(()=>{})，\n" +
+        "                 既不判 ok:false 也不提示 —— 界面显示 B、服务端指针仍是 A，\n" +
+        "                 之后所有读写都打在 A 上，而用户以为切过去了。\n" +
+        "                 与「点会话图里的靶标节点」那条路径保持同一口径。 */\n" +
+        "              const nextEng = e.target.value\n" +
+        "              const prevEng = eng\n" +
+        "              setEng(nextEng)\n" +
+        "              loadSnapshot(nextEng)\n" +
+        "              /* 同步「当前靶标」：原生 skill 目录按它解析技能根 */\n" +
+        "              api({ op: 'activateEngagement', engagement: nextEng }).then((r) => {\n" +
+        "                if (r && r.ok === false) {\n" +
+        "                  setEng(prevEng)\n" +
+        "                  loadSnapshot(prevEng)\n" +
+        "                  setErr('切换靶标失败：' + ((r && r.error) || '服务端未确认') + '（已回滚到上一个靶标）')\n" +
+        "                } else {\n" +
+        "                  setErr(null)\n" +
+        "                }\n" +
+        "              }, (err2) => {\n" +
+        "                setEng(prevEng)\n" +
+        "                loadSnapshot(prevEng)\n" +
+        "                setErr('切换靶标失败：' + String((err2 && err2.message) || err2) + '（已回滚到上一个靶标）')\n" +
+        "              })\n",
+    },
+    // 会话关系图：把宿主的真实活动态与父子关系并进图里
+    //   store.sessionGraph() 只有「会话 → 靶标」这一层，因为 store 拿不到宿主服务。
+    //   ui.js 有 ctx，能取 sessions / subagents —— safe 那张图回答的正是
+    //   「谁是谁的子代理、现在在干什么」，这一层过去是缺的。
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find: "  return assignToolkitFolder(request.dir, root)\n}\n",
+      replace:
+        "  return assignToolkitFolder(request.dir, root)\n" +
+        "}\n" +
+        "\n" +
+        "/**\n" +
+        " * 会话关系图 op（在 store 分发之前拦）：把宿主里真实存在的会话的**活动态与父子关系**\n" +
+        " * 并进 store.sessionGraph()。\n" +
+        " *\n" +
+        " * 为什么不直打 /api/session/list：那个 rpcId/method 没有版本承诺，宿主升级后会静默\n" +
+        " * 变成空白图且不报错（safe 就是这样坏的）。这里走 ctx 的 sessions 服务，取不到就\n" +
+        " * 退回只有绑定关系的图，并显式标 live:false —— 「没有实时数据」和「没有会话」不同。\n" +
+        " *\n" +
+        " * 子代理的处理：绑定过靶标的会话，它的后代即使自己没绑靶标也画出来（继承祖先的\n" +
+        " * 靶标），否则「子代理在干什么」永远看不到。总数仍受前端 300 节点上限约束。\n" +
+        " */\n" +
+        "async function handleSessionMapOp(ctx, store, request) {\n" +
+        "  if (!request || request.op !== 'sessionGraph') return undefined\n" +
+        "  let base\n" +
+        "  try { base = store.sessionGraph() } catch (error) {\n" +
+        "    return { ok: false, error: '读会话绑定失败：' + (error && error.message ? error.message : String(error)) }\n" +
+        "  }\n" +
+        "  const sessions = ctx && typeof ctx.get === 'function' ? ctx.get('sessions') : undefined\n" +
+        "  if (sessions === undefined || sessions === null || typeof sessions.list !== 'function') {\n" +
+        "    return Object.assign({ ok: true, live: false }, base)\n" +
+        "  }\n" +
+        "  let list = []\n" +
+        "  let listOk = true\n" +
+        "  try { list = sessions.list() || [] } catch { list = []; listOk = false }\n" +
+        "  /* 取数失败必须显式降级：过去吞掉异常后照样返回 live:true，于是所有会话\n" +
+        "     变成 activity:'unknown'，面板显示「跑 0 · 闲 0」—— 那是「不知道」，\n" +
+        "     不是「都在闲着」（R21 审计 RB-02）。 */\n" +
+        "  if (!listOk) {\n" +
+        "    return Object.assign({ ok: true, live: false, live_error: '宿主 sessions.list() 读取失败，图里只有绑定关系' }, base)\n" +
+        "  }\n" +
+        "  /* 判定逻辑在 live-views.js 里（纯函数），这里只负责取数与拼装。 */\n" +
+        "  const merged = mergeSessionGraphLive(base, list)\n" +
+        "  return Object.assign({ ok: true, live: true }, base, merged)\n" +
+        "}\n",
+    },
+    {
+      file: "lib/redteam/ui.js",
+      required: true,
+      find:
+        "        const platformResult = handlePlatformOp(store, request)\n" +
+        "        if (platformResult !== undefined) {\n" +
+        "          sendJson(res, 200, platformResult)\n" +
+        "          return\n" +
+        "        }\n",
+      replace:
+        "        const platformResult = handlePlatformOp(store, request)\n" +
+        "        if (platformResult !== undefined) {\n" +
+        "          sendJson(res, 200, platformResult)\n" +
+        "          return\n" +
+        "        }\n" +
+        "        /* [dsh-purge-plus] 会话关系图：先并宿主的活动态/父子关系，再交给前端。 */\n" +
+        "        const sessionMapResult = await handleSessionMapOp(ctx, store, request)\n" +
+        "        if (sessionMapResult !== undefined) {\n" +
+        "          sendJson(res, 200, sessionMapResult)\n" +
+        "          return\n" +
+        "        }\n",
     },
   ];
 }

@@ -150,5 +150,18 @@ export function installPlusCapabilities(ctx, cfg = {}) {
       );
     } catch { /* 没有 logger 就算了 */ }
   }
+  /* [dsh-purge-plus] R22：把「装上了什么」也打出来。
+   *
+   * 之前只记失败，成功时一条日志都没有 —— 于是「team-mode 到底装没装」这个问题
+   * 只能靠读代码回答，审计里就出现过「installTeamMode 零调用方」这种误判
+   * （实际在调用，只是没有任何可观测痕迹）。成功也留一行，成本一次 apply。
+   */
+  try {
+    ctx.logger?.info?.(
+      "[dsh-purge-plus] 能力接线：已装 %s%s",
+      installed.length ? installed.join(",") : "(无)",
+      failed.length ? `；失败 ${failed.map((f) => f.name).join(",")}` : "",
+    );
+  } catch { /* 没有 logger 就算了 */ }
   return { installed, failed };
 }

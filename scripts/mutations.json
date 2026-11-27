@@ -68,10 +68,10 @@
   {
     "id": "M7-savePrompt-wipe",
     "file": "lib/redteam/store-core.js",
-    "find": "    if (content === undefined) throw new Error('savePrompt 需要 content（要清空请显式传空字符串）')",
-    "replace": "    if (false) throw new Error('savePrompt 需要 content')",
+    "find": "    if (content === undefined) throw new Error('savePrompt 需要 content（要清空请显式传空字符串）')\n    /* [dsh-purge-plus] 非字符串 content 曾被 String() 写成 \"[object Object]\"（15 字节），\n       还会因为「与默认不一致」被从 manifest 删掉 → 此后永不随版本升级，而返回 ok:true。\n       角色提示词是给智能体的指令，写坏了整轮行为都歪，所以必须拒绝。 */\n    if (typeof content !== 'string') {\n      throw new TypeError('prompt content 必须是字符串，收到 '\n        + (content === null ? 'null' : typeof content))\n    }\n    mkdirSync(this.promptsDirOf(id), { recursive: true })\n    const text = content\n",
+    "replace": "    if (false) throw new Error('savePrompt 需要 content')\n    mkdirSync(this.promptsDirOf(id), { recursive: true })\n    const text = String(content ?? '')\n",
     "test": "test-r11-fixes.mjs",
-    "why": "漏传 content 被当成「清空」，整份角色提示词写成 0 字节并退出自动升级（R11-1）",
+    "why": "两道守卫（漏传 undefined / 非字符串）同时失效 → 提示词被写成 0 字节或 \"[object Object]\"，并退出自动升级（R11-1 + R19-13）",
     "groups": [
       50
     ]
@@ -438,5 +438,181 @@
       10
     ],
     "why": "版本比较写反：面板与宿主版本不一致时反而静默，设置看起来「不生效」却没有任何提示（P25）"
+  },
+  {
+    "id": "M54-cleanup-undefined-null",
+    "file": "lib/redteam/store-core.js",
+    "find": "if (Object.prototype.hasOwnProperty.call(patch, f) && patch[f] !== undefined) {",
+    "replace": "if (Object.prototype.hasOwnProperty.call(patch, f)) {",
+    "test": "test-r19-fixes.mjs",
+    "groups": [
+      51
+    ],
+    "why": "把 undefined 当成「要改成 NULL」：只改 detail 会把 target/title/priority 抹掉，报告收尾段的清理台账变空行（R19 新增-1）"
+  },
+  {
+    "id": "M55-vuln-empty",
+    "file": "lib/redteam/store-core.js",
+    "find": "    if (String(v.title ?? '').trim() === '' && String(v.cve ?? '').trim() === '') {\n      throw new Error('vuln 至少需要 title 或 cve：空载荷会落一条没有标题的漏洞行，污染漏洞表与统计')\n    }\n",
+    "replace": "",
+    "test": "test-r20-fixes.mjs",
+    "groups": [
+      52
+    ],
+    "why": "空载荷重新落一条 title=NULL 的漏洞行：被统计、被报告、无法处置（R19-04）"
+  },
+  {
+    "id": "M56-stage-shell",
+    "file": "lib/redteam/store-core.js",
+    "find": "    if (db.prepare('SELECT code FROM stage WHERE code = ?').get(String(patch.code)) === undefined) {\n      this.seedStages(id)\n    }\n",
+    "replace": "",
+    "test": "test-r20-fixes.mjs",
+    "groups": [
+      52
+    ],
+    "why": "只给 code 的 saveStage 重新插入空壳阶段，内置定义（互联网资产权限/3 段手段/工具）永久补不回来（R19-06）"
+  },
+  {
+    "id": "M57-prompt-type",
+    "file": "lib/redteam/store-core.js",
+    "find": "    if (typeof content !== 'string') {\n      throw new TypeError('prompt content 必须是字符串，收到 '\n        + (content === null ? 'null' : typeof content))\n    }\n    mkdirSync(this.promptsDirOf(id), { recursive: true })\n    const text = content\n",
+    "replace": "    mkdirSync(this.promptsDirOf(id), { recursive: true })\n    const text = String(content ?? '')\n",
+    "test": "test-r20-fixes.mjs",
+    "groups": [
+      52
+    ],
+    "why": "对象 content 被 String() 写成 \"[object Object]\"，角色提示词永久损坏且退出自动升级（R19-13）"
+  },
+  {
+    "id": "M58-cleanup-shape",
+    "file": "lib/redteam/store-core.js",
+    "find": "    return { cleanup_id: Number(itemId), cleanup: db.prepare('SELECT * FROM cleanup_item WHERE id = ?').get(Number(itemId)) }\n",
+    "replace": "    return { cleanup: db.prepare('SELECT * FROM cleanup_item WHERE id = ?').get(Number(itemId)) }\n",
+    "test": "test-r20-fixes.mjs",
+    "groups": [
+      52
+    ],
+    "why": "add 与 update 返回形状再次分叉：调用方拿到 update 结果时没有 cleanup_id，无法继续操作（R19-safe 低）"
+  },
+  {
+    "id": "M59-import-bundle",
+    "file": "lib/redteam/store-core.js",
+    "find": "      const explicit = req.bundle && typeof req.bundle === 'object' && !Array.isArray(req.bundle)\n      const imported = store.importBundle(id, explicit ? req.bundle : req)\n",
+    "replace": "      const explicit = null\n      const imported = store.importBundle(id, req)\n",
+    "test": "test-r20-fixes.mjs",
+    "groups": [
+      52
+    ],
+    "why": "{bundle:{…}} 重新变成零入库却 ok:true：调用方以为导入成功，实际一条没进（R19-08)"
+  },
+  {
+    "id": "M60-slot-parked",
+    "file": "lib/redteam/live-views.js",
+    "find": "    if (isParked(c.parent, c.id)) parked.push(c)\n    else running.push(c)\n",
+    "replace": "    running.push(c)\n",
+    "test": "test-r21-features.mjs",
+    "groups": [
+      53
+    ],
+    "why": "waiting/blocked 的智能体重新占名额：工具说还有名额、面板说满了（slot-state.js 注释警告的那个故障）"
+  },
+  {
+    "id": "M61-session-tree",
+    "file": "lib/redteam/live-views.js",
+    "find": "  for (const s of (base && base.sessions) || []) walk(String(s.id), s.engagement, 1)\n",
+    "replace": "  /* 变异：不挂后代 */\n",
+    "test": "test-r21-features.mjs",
+    "groups": [
+      53
+    ],
+    "why": "子代理树消失：图只回答「哪些会话绑过靶标」，回答不了「谁是谁的子代理」"
+  },
+  {
+    "id": "M62-templates-defaults",
+    "file": "lib/redteam/platform-config.js",
+    "find": "  templatesRefreshedAt: 0,\n  templatesCommit: '',\n  templatesCount: 0,\n  templatesLastError: '',\n",
+    "replace": "",
+    "test": "test-r21-features.mjs",
+    "groups": [
+      53
+    ],
+    "why": "4 个 templates* 默认键消失：按 safe 写的调用方读 cfg.templatesCount 得到 undefined"
+  },
+  {
+    "id": "M63-kev-count",
+    "file": "lib/redteam/store-core.js",
+    "find": "          const list = Array.isArray(raw) ? raw : (Array.isArray(raw.vulnerabilities) ? raw.vulnerabilities : [])\n          count = list.length\n",
+    "replace": "          const list = Array.isArray(raw) ? raw : (Array.isArray(raw.vulnerabilities) ? raw.vulnerabilities : [])\n          count = 0\n",
+    "test": "test-r21-features.mjs",
+    "groups": [
+      53
+    ],
+    "why": "KEV 条目数恒 0：环境适配页把 1790 条公告显示成「文件在但读不出条目」"
+  },
+  {
+    "id": "M64-drag-zoom",
+    "file": "client.js",
+    "find": "      const dx = (ev.clientX - drag.startX) / scale\n",
+    "replace": "      const dx = (ev.clientX - drag.startX)\n",
+    "test": "test-r21-features.mjs",
+    "groups": [
+      53
+    ],
+    "why": "缩放后拖拽不按 zoom 折算：0.5 倍时节点只走一半距离，2 倍时走两倍，表现为「越拖越跟不上鼠标」"
+  },
+  {
+    "id": "M65-wheel-passive",
+    "file": "client.js",
+    "find": "      el.addEventListener('wheel', onWheel, { passive: false })\n",
+    "replace": "      el.addEventListener('wheel', onWheel)\n",
+    "test": "test-r21-features.mjs",
+    "groups": [
+      53
+    ],
+    "why": "滚轮监听器退回 passive：preventDefault 被浏览器忽略，捏合缩放时页面跟着滚"
+  },
+  {
+    "id": "M66-alias-kevonly",
+    "file": "lib/redteam/store-core.js",
+    "find": "          kevOnly: req.kevOnly === true,\n",
+    "replace": "          kevOnly: false,\n",
+    "test": "test-r22-alias.mjs",
+    "groups": [
+      54
+    ],
+    "why": "cveSearch 丢掉 kevOnly 过滤：传了 kevOnly 也返回全部，调用方以为筛过了"
+  },
+  {
+    "id": "M67-alias-dbnote",
+    "file": "lib/redteam/store-core.js",
+    "find": "        ? { note: String(cveStatus.note || '公开漏洞底库不可用：kb/cve.db 还没构建出来') }\n        : null;\n",
+    "replace": "        ? null\n        : null;\n",
+    "test": "test-r22-alias.mjs",
+    "groups": [
+      54
+    ],
+    "why": "底库不在时不再附 note：空数组 + ok:true 看起来就是「没命中」"
+  },
+  {
+    "id": "M68-team-mode-off",
+    "file": "lib/redteam/team-mode.js",
+    "find": "    session.append('team/mode', { enabled: true })\n",
+    "replace": "    session.append('team/mode', { enabled: false })\n",
+    "test": "test-r22-alias.mjs",
+    "groups": [
+      54
+    ],
+    "why": "team-mode 写成 enabled:false：红队根会话仍然拿不到 team_task_* 工具"
+  },
+  {
+    "id": "M69-hung-string",
+    "file": "lib/patches/overlay.mjs",
+    "find": "typeof dshPurgeHungValue === \"string\"",
+    "replace": "typeof dshPurgeHungValue === \"string-disabled\"",
+    "test": "test-r22-alias.mjs",
+    "groups": [
+      54
+    ],
+    "why": "#209 只认 function 不认 string：按 safe 契约写的挂针被静默丢掉"
   }
 ]

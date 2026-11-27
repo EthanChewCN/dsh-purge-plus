@@ -251,4 +251,53 @@ export const OVERLAY_PATCHES = [
     ],
     markers: ["[dsh-purge-plus] 活着的空白会话也要沿用已记下的预设"],
   },
+
+  // ── 209 挂针契约：string 与 function 都认 ───────────────────────────
+  //
+  // 背景：safe 2.0.2 的 #90/#91 在 **provider 层**读
+  //   `typeof globalThis.__dshPurgeHungPrompt === "string"`
+  // 而我们（以及 community 基座）写的是 **function**。两边约定不同，谁先写谁生效，
+  // 另一方读到的就是「没有挂针」—— 静默失效，没有任何报错。
+  //
+  // 本包不移植 #90/#91 的注入（理由见 NOTICE-PLUS §8：注入已经由 #88 在
+  // agent-loop 一处完成，provider 层再注一遍只会糊成两份；且 #90 的第 4 条替换
+  // 会把 `<project_instructions>` 从系统提示里删掉，与本包的注入格式直接冲突）。
+  //
+  // 但 #90/#91 的**契约宽容**值得拿过来：function 与 string 都认。
+  // 这样任何按 safe 契约写挂针的插件/脚本，在本包基座上也不会被丢掉。
+  //
+  // 语义是**严格超集**，且顺手收紧一处：
+  //   · function 分支：调用结果必须**是字符串**才采用（原版 `String(fn() || "")`
+  //     会把返回对象变成 "[object Object]" 注入系统提示）；
+  //   · string 分支：新增，trim 后采用；
+  //   · 其余类型：空串。
+  // 本包自己的挂针函数始终返回字符串，所以这条收紧对自身零影响。
+  {
+    id: 209,
+    name: "HUNG_PROMPT_ACCEPTS_STRING_CONTRACT",
+    layer: "代码",
+    layer_en: "Code",
+    desc: "挂针同时认 function 与 string 两种契约，且非字符串返回值不再被 String() 糊成 [object Object] / hung prompt accepts both contracts, non-string results are dropped",
+    file: ["agent-loop"],
+    optional: true,
+    skipIfMarked: true,
+    // 级联：209 的锚点是 88 打完之后的产物；88 没落地前不报漂移。
+    chainedAfter: 88,
+    replacements: [
+      {
+        expect: 1,
+        pattern:
+          '\t\tconst dshPurgeHung = typeof globalThis.__dshPurgeHungPrompt === "function" ? String(globalThis.__dshPurgeHungPrompt({ agent: this }) || "").trim() : "";\n',
+        replace:
+          "\t\t/* [dsh-purge-plus-209] 两种契约都认：safe 2.0.2 的 #90/#91 写/读的是 string，\n" +
+          "\t\t   本基座（#88）写的是 function。只认一种会让另一方的注入静默消失。\n" +
+          "\t\t   另外只接受字符串返回值 —— 原版 String(fn() || \"\") 会把返回对象\n" +
+          "\t\t   糊成 \"[object Object]\" 注入系统提示。 */\n" +
+          "\t\tconst dshPurgeHungRaw = globalThis.__dshPurgeHungPrompt;\n" +
+          "\t\tconst dshPurgeHungValue = typeof dshPurgeHungRaw === \"function\" ? dshPurgeHungRaw({ agent: this }) : dshPurgeHungRaw;\n" +
+          '\t\tconst dshPurgeHung = typeof dshPurgeHungValue === "string" ? dshPurgeHungValue.trim() : "";\n',
+      },
+    ],
+    markers: ["[dsh-purge-plus-209] 两种契约都认"],
+  },
 ];

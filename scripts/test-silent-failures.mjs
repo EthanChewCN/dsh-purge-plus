@@ -130,14 +130,19 @@ section("[4] 符号链接形态的技能按目标类型识别");
 /* ── 5. 模板索引：`.github/` 下的 CI 文件不是模板 ───────────────── */
 section("[5] nuclei 模板索引过滤掉非模板 YAML");
 const storeSrc = fs.readFileSync(path.join(PKG, "lib/redteam/store-core.js"), "utf8");
-ok(/if \(!\/\^\\s\*id:\\s\*\\S\+\/m\.test\(full\)\) continue/.test(storeSrc),
-  "walk() 用顶层 id: 判定是不是模板");
-/* 索引版本升到 3 的原因：元组从 4 位变 5 位（多了 cves 列），旧缓存必须作废重算。 */
-ok(/Number\(cached\.v \|\| 0\) === 3/.test(storeSrc), "旧索引缓存会作废重算（否则新规则不生效）");
+ok(/if \(!\/\^id:\\s\*\\S\+\/m\.test\(full\)\) continue/.test(storeSrc),
+  "walk() 只认**顶层** id:（正则不能再带 \\s* 前缀）");
+/* 索引版本升到 4 的原因：过滤规则从「任意缩进的 id:」收紧成「顶层 id:」，
+   旧缓存里的 4 个 .github 条目必须作废重算。 */
+ok(/Number\(cached\.v \|\| 0\) === 4/.test(storeSrc), "旧索引缓存会作废重算（否则新规则不生效）");
 {
-  const hasId = (head) => /^\s*id:\s*\S+/m.test(head);
+  /* 判据必须和产物用同一条正则 —— 之前这里写的是 /^\s*id:/，
+     于是「缩进的 step id」在断言里也被当成顶层 id，4 个 CI 文件在门禁眼皮底下混进索引。 */
+  const hasId = (head) => /^id:\s*\S+/m.test(head);
   ok(hasId("id: CVE-2021-44228\ninfo:\n  name: x\n") === true, "真模板（有 id:）保留");
   ok(hasId("name: CI\non: [push]\njobs:\n  build:\n") === false, ".github/workflows/ci.yml 被排除");
+  ok(hasId("jobs:\n  build:\n    steps:\n      - name: Run\n        id: run-tests\n") === false,
+    "缩进的 step id 不算顶层 id（这正是那 4 个文件混进来的原因）");
   ok(hasId("name: Enhancement Request\ndescription: x\n") === false, ".github/ISSUE_TEMPLATE 被排除");
 }
 

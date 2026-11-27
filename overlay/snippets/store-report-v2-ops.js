@@ -9,12 +9,14 @@
             target: req.target, asset_id: req.asset_id, limit: req.limit,
           }))
         }
+        /* [dsh-purge-plus] 兼容 safe 的 `{ proof: {…} }` 包装（safe 约定 `req.proof || req`）。 */
+        const psrc = req.proof !== null && typeof req.proof === 'object' && !Array.isArray(req.proof) ? req.proof : req
         const out = store.addDataProof(pid, {
-          asset_id: req.asset_id, vuln_id: req.vuln_id, target: req.target,
-          source: req.source, interface: req.interface, fields: req.fields,
-          row_count: req.row_count, sample: req.sample, query: req.query,
-          evidence_ref: req.evidence_ref, pii_type: req.pii_type, note: req.note,
-          created_by: req.actor,
+          asset_id: psrc.asset_id, vuln_id: psrc.vuln_id, target: psrc.target,
+          source: psrc.source, interface: psrc.interface, fields: psrc.fields,
+          row_count: psrc.row_count, sample: psrc.sample, query: psrc.query,
+          evidence_ref: psrc.evidence_ref, pii_type: psrc.pii_type, note: psrc.note,
+          created_by: psrc.created_by !== undefined ? psrc.created_by : psrc.actor,
         })
         return Object.assign({ ok: true, engagement: pid }, out)
       } catch (e) {

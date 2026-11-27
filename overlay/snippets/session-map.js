@@ -138,6 +138,24 @@
       const [query, setQuery] = React.useState('')
       const [positions, setPositions] = React.useState(new Map())
       const [msg, setMsg] = React.useState(null)
+      /* safe 的图有、我们过去没有的四样：缩放、暂停自动刷新、全屏、活动态筛选。
+         每一样都对应一个真实场景：
+           缩放 —— 5 个靶标 / 100 个会话时整图 16000px 高，不缩放只能看到左上角
+           暂停 —— 正在盯某个节点时 5 秒一次的轮询会把它重新布局/滚走
+           全屏 —— 620px 的 dock 里图只有 350px 宽，节点被详情栏盖住
+           活动态 —— 「谁在跑」是这张图最常被问的问题，只有形状回答不了 */
+      const [activity, setActivity] = React.useState('all')
+      const [zoom, setZoom] = React.useState(1)
+      const [paused, setPaused] = React.useState(false)
+      const [pausedAt, setPausedAt] = React.useState(null)
+      const [expanded, setExpanded] = React.useState(false)
+      const [now, setNow] = React.useState(() => Date.now())
+      const mapRef = React.useRef(null)
+      const graphRef = React.useRef(null)
+      const pausedRef = React.useRef(false)
+      pausedRef.current = paused
+      const expandedRef = React.useRef(false)
+      expandedRef.current = expanded
       /* 两个槽：自动（refreshKey 触发）与手动（点刷新）互不干扰。
          safe 共用一个 AbortController，轮询在途时点刷新会被直接丢掉。 */
       const autoSeq = React.useRef(0)
@@ -168,9 +186,86 @@
       }
       React.useEffect(() => { load(false) }, [refreshKey])
 
+      /* 5 秒轮询（safe 同频）：关系图的价值在于「现在」，只在 refreshKey 变化时读
+         等于打开页面那一刻的静态快照。暂停时彻底停表 —— 不是「读了但不显示」，
+         那样在途请求仍会把用户正在看的布局换掉。 */
+      React.useEffect(() => {
+        if (paused) return undefined
+        const timer = setInterval(() => {
+          if (pausedRef.current) return
+          load(false)
+        }, 5000)
+        /* 计时器不 unref：它属于这个组件，卸载时 clearInterval 就够了；
+           unref 会让 Node 侧测试进程在等它时提前退出。 */
+        return () => clearInterval(timer)
+      }, [paused, refreshKey])
+
+      /* 暂停时也要让「N 秒前」走字，否则界面看起来是死的 */
+      React.useEffect(() => {
+        if (!paused) return undefined
+        const timer = setInterval(() => setNow(Date.now()), 1000)
+        return () => clearInterval(timer)
+      }, [paused])
+
+      /* 全屏：原生 Fullscreen API 可能被宿主禁掉（Electron 里 requestFullscreen 有时
+         直接 reject），所以本地 maximized 是主路径，原生全屏只是加分项。 */
+      const leaveFullscreen = () => {
+        if (document.fullscreenElement === mapRef.current && document.exitFullscreen) {
+          try { document.exitFullscreen().catch(() => {}) } catch { /* 本地最大化照样关 */ }
+        }
+        setExpanded(false)
+      }
+      const toggleFullscreen = () => {
+        if (expanded) { leaveFullscreen(); return }
+        setExpanded(true)
+        const element = mapRef.current
+        if (element && element.requestFullscreen) {
+          try { element.requestFullscreen().catch(() => {}) } catch { /* 保留本地最大化 */ }
+        }
+      }
+      /* 滚轮缩放必须挂**原生**监听器（passive:false）：React 的 onWheel 在根节点上
+         是 passive 的，里面调 preventDefault 只会得到一条浏览器警告，页面照样滚动。
+         只在带修饰键（触控板捏合 / Ctrl+滚轮）时缩放，普通滚轮仍然滚动画布 ——
+         这是「看图」与「翻页」两种意图的分界。 */
+      React.useEffect(() => {
+        const el = graphRef.current
+        if (!el || typeof el.addEventListener !== 'function') return undefined
+        const onWheel = (ev) => {
+          if (!ev.ctrlKey && !ev.metaKey) return
+          ev.preventDefault()
+          setZoom((prev) => {
+            const next = prev * (ev.deltaY < 0 ? 1.1 : 1 / 1.1)
+            return Math.min(2, Math.max(0.35, Math.round(next * 100) / 100))
+          })
+        }
+        el.addEventListener('wheel', onWheel, { passive: false })
+        return () => el.removeEventListener('wheel', onWheel)
+      })
+
+      React.useEffect(() => {
+        const onFullscreenChange = () => {
+          if (document.fullscreenElement !== mapRef.current) setExpanded(false)
+        }
+        const onKey = (event) => {
+          if (event.key !== 'Escape' || !expandedRef.current) return
+          if (event.stopPropagation) event.stopPropagation()
+          leaveFullscreen()
+        }
+        document.addEventListener('fullscreenchange', onFullscreenChange)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('fullscreenchange', onFullscreenChange)
+          document.removeEventListener('keydown', onKey)
+          if (document.fullscreenElement === mapRef.current && document.exitFullscreen) {
+            try { document.exitFullscreen().catch(() => {}) } catch { /* 卸载时宿主可能已经退出全屏 */ }
+          }
+        }
+      }, [])
+
       const buildItems = () => {
         const out = []
         const engagements = (data && data.engagements) || []
+        const bySessionId = new Set(((data && data.sessions) || []).map((s) => String(s.id)))
         for (const eng of engagements) {
           out.push({
             id: 'eng:' + eng.id, kind: 'engagement', parent: null,
@@ -178,11 +273,18 @@
           })
         }
         for (const s of (data && data.sessions) || []) {
+          /* 父会话优先取宿主给的父子关系（子代理树）；父节点不在本次结果里时
+             退回到它所属靶标 —— 否则子代理会变成孤点，连不到任何靶标。 */
+          const parentKey = s.parent && bySessionId.has(String(s.parent))
+            ? 'ses:' + s.parent
+            : 'eng:' + s.engagement
           out.push({
-            id: 'ses:' + s.id, kind: 'session', parent: 'eng:' + s.engagement,
-            engagement: s.engagement, session: s.id, label: s.id,
+            id: 'ses:' + s.id, kind: 'session', parent: parentKey,
+            engagement: s.engagement, session: s.id, label: s.name || s.id,
             at: s.at || null, waiting: s.waiting || null, current: !!s.current,
             short: s.short || s.id,
+            activity: s.activity || 'unknown', live: s.live === true,
+            subagent: !!s.parent,
           })
         }
         return out
@@ -197,8 +299,15 @@
       }
       const selected = graph === null ? null : (graph.nodes.find((n) => n.id === selectedId) || null)
       const q = query.trim().toLowerCase()
-      const hit = (node) => q === '' || String(node.label || '').toLowerCase().indexOf(q) >= 0
-        || String(node.engagement || '').toLowerCase().indexOf(q) >= 0
+      /* 活动态筛选只淡出、不删节点：删节点会改变布局，用户刚拖好的位置全乱；
+         而「淡出」保持了形状，一眼就能看出「哪一片在跑」。靶标节点始终不淡出。 */
+      const activityOk = (node) => {
+        if (activity === 'all') return true
+        if (node.kind !== 'session') return true
+        return String(node.activity || 'unknown') === activity
+      }
+      const hit = (node) => activityOk(node) && (q === '' || String(node.label || '').toLowerCase().indexOf(q) >= 0
+        || String(node.engagement || '').toLowerCase().indexOf(q) >= 0)
 
       /* 切靶标必须走 activateEngagement：只调 props.onPick 只是把面板的 state 换掉，
          后端的「当前靶标」指针没动 —— 智能体下一次工具调用仍然打在旧靶标上。
@@ -229,9 +338,13 @@
         /* 按钮已经松开但 pointerup 丢了（拖出窗口/被别的元素吃掉）：
            这里必须收手，否则鼠标一动节点就跟着跑。 */
         if (ev.buttons === 0) { dragRef.current = null; return }
-        const dx = ev.clientX - drag.startX
-        const dy = ev.clientY - drag.startY
-        if (Math.abs(dx) + Math.abs(dy) < 4) return
+        /* [dsh-purge-plus] 除以 zoom：节点坐标在**被 scale 的那层**里，
+           而 clientX 是屏幕像素。缩放 0.5 时不除，节点只走一半距离；
+           缩放 2 时走两倍 —— 两种都表现为「越拖越跟不上鼠标」。 */
+        const scale = zoom > 0 ? zoom : 1
+        const dx = (ev.clientX - drag.startX) / scale
+        const dy = (ev.clientY - drag.startY) / scale
+        if (Math.abs(dx) + Math.abs(dy) < 4 / scale) return
         drag.moved = true
         setPositions((prev) => {
           const next = new Map(prev)
@@ -257,13 +370,62 @@
       }
       const dim = { color: 'var(--dsw-alias-label-secondary)' }
 
-      return h('div', { className: 'rt-card rt-sm-card' },
+      return h('div', {
+        className: 'rt-card rt-sm-card' + (expanded ? ' is-expanded' : ''),
+        ref: mapRef,
+      },
         h('div', { className: 'rt-sm-head' },
           h('h4', null, '会话关系图',
-            h('span', { className: 'rt-tag rt-tag-passive', style: { marginLeft: 6 } }, '本机落盘'),
+            h('span', { className: 'rt-tag rt-tag-passive', style: { marginLeft: 6 } },
+              data && data.live === false ? '仅绑定关系' : '本机落盘'),
             stale ? h('span', { className: 'rt-tag rt-tag-warn', style: { marginLeft: 6 } }, '数据陈旧') : null,
-            data && data.sessions ? h('span', { className: 'rt-tag', style: { marginLeft: 6 } }, data.sessions.length + ' 个会话') : null),
+            paused
+              ? h('span', { className: 'rt-tag rt-tag-warn', style: { marginLeft: 6 } },
+                  '已暂停' + (pausedAt ? ' · ' + Math.max(0, Math.round((now - pausedAt) / 1000)) + ' 秒前' : ''))
+              : null,
+            data && data.sessions ? h('span', { className: 'rt-tag', style: { marginLeft: 6 } }, data.sessions.length + ' 个会话') : null,
+            data && data.activity_counts
+              ? h('span', { className: 'rt-tag', style: { marginLeft: 6 } },
+                  '跑 ' + data.activity_counts.running + ' · 闲 ' + data.activity_counts.idle)
+              : null),
           h('div', { className: 'rt-spacer' }),
+          h('select', {
+            className: 'rt-input rt-sm-activity',
+            value: activity,
+            title: '按活动态筛选（只淡出，不减少节点）',
+            onChange: (e) => setActivity(e.target.value),
+          },
+            h('option', { value: 'all' }, '全部活动态'),
+            h('option', { value: 'running' }, '运行中'),
+            h('option', { value: 'idle' }, '空闲'),
+            h('option', { value: 'unknown' }, '未知')),
+          h('button', {
+            className: 'rt-btn', type: 'button', title: '缩小',
+            onClick: () => setZoom((z) => Math.max(0.35, Math.round(z / 1.1 * 100) / 100)),
+          }, '−'),
+          h('button', {
+            className: 'rt-btn', type: 'button', title: '恢复 100%',
+            onClick: () => setZoom(1),
+          }, Math.round(zoom * 100) + '%'),
+          h('button', {
+            className: 'rt-btn', type: 'button', title: '放大',
+            onClick: () => setZoom((z) => Math.min(2, Math.round(z * 1.1 * 100) / 100)),
+          }, '+'),
+          h('button', {
+            className: 'rt-btn', type: 'button',
+            title: paused ? '恢复 5 秒自动刷新' : '暂停自动刷新（正在盯节点时用）',
+            onClick: () => {
+              setPaused((prev) => {
+                if (prev) { setPausedAt(null); return false }
+                setPausedAt(Date.now())
+                return true
+              })
+            },
+          }, paused ? '继续' : '暂停'),
+          h('button', {
+            className: 'rt-btn', type: 'button', title: expanded ? '退出全屏（Esc）' : '全屏看这张图',
+            onClick: toggleFullscreen,
+          }, expanded ? '退出全屏' : '全屏'),
           h('button', { className: 'rt-btn', disabled: manualBusy, onClick: () => load(true) },
             manualBusy ? '读取中…' : '刷新')),
         h('div', { className: 'rt-sm-note' },
@@ -274,8 +436,10 @@
         layoutErr ? h('div', { className: 'rt-err' },
           layoutErr === 'session-map-too-large'
             ? '节点超过 ' + SM_MAX_NODES + ' 个，图不再渲染（一次画几千个节点会把面板卡死）。'
-              + '先按靶标筛选：下面的搜索会把不匹配的节点淡出，但不会减少节点数 ——'
-              + '要减少节点请清理不再使用的靶标（或等我们把图改成按靶标分页）。'
+              /* [dsh-purge-plus] 这里曾经写「下面的搜索会把不匹配的节点淡出」，
+                 而搜索框正好在被跳过的那个分支里 —— 用户照做时找不到任何输入框。
+                 改成指出真的存在、真的能减少节点的入口。 */
+              + '要减少节点：清理不再使用的靶标，或在顶部只选一个靶标后重新打开本页。'
             : '布局失败：' + layoutErr) : null,
         !layoutErr && items.length === 0
           ? h('div', { className: 'rt-empty' },
@@ -291,7 +455,21 @@
                 }),
                 h('div', {
                   className: 'rt-sm-graph',
-                  style: { width: graph.width + 'px', height: graph.height + 'px' },
+                  /* 缩放靠外层改尺寸、内层改 transform：只改 transform 的话，
+                     父容器的可滚动范围仍是原尺寸，缩小时右下角会留一大片空白。 */
+                  style: {
+                    width: Math.round(graph.width * zoom) + 'px',
+                    height: Math.round(graph.height * zoom) + 'px',
+                    overflow: 'hidden',
+                  },
+                  ref: graphRef,
+                },
+                h('div', {
+                  style: {
+                    position: 'absolute', left: 0, top: 0,
+                    width: graph.width + 'px', height: graph.height + 'px',
+                    transform: 'scale(' + zoom + ')', transformOrigin: '0 0',
+                  },
                 },
                   h('svg', {
                     className: 'rt-sm-svg', width: graph.width, height: graph.height,
@@ -308,7 +486,9 @@
                       + (node.current ? ' is-current' : '')
                       + (node.id === selectedId ? ' is-selected' : '')
                       + (hit(node) ? '' : ' is-dim')
-                      + (node.waiting ? ' is-waiting' : ''),
+                      + (node.waiting ? ' is-waiting' : '')
+                      + (node.activity === 'running' ? ' is-running' : '')
+                      + (node.subagent ? ' is-subagent' : ''),
                     style: { left: node.x + 'px', top: node.y + 'px', width: SM_NODE_W + 'px', height: SM_NODE_H + 'px' },
                     title: node.kind === 'engagement' ? '点一下切到这个靶标' : '点一下看详情',
                     onPointerDown: (ev) => onDown(node, ev),
@@ -318,7 +498,14 @@
                     onLostPointerCapture: onCancel,
                   },
                     h('div', { className: 'rt-sm-node-title' },
-                      node.kind === 'engagement' ? '靶标' : '会话',
+                      node.kind === 'engagement' ? '靶标' : (node.subagent ? '子代理' : '会话'),
+                      node.kind === 'session'
+                        ? h('span', {
+                            className: 'rt-tag' + (node.activity === 'running' ? ' rt-tag-live' : ''),
+                            style: { marginLeft: 4 },
+                            title: '宿主报告的活动态',
+                          }, node.activity === 'running' ? '跑' : (node.activity === 'idle' ? '闲' : '?'))
+                        : null,
                       node.current ? h('span', { className: 'rt-tag rt-tag-live', style: { marginLeft: 4 } }, '本会话') : null),
                     h('div', { className: 'rt-sm-node-label' }, node.label || node.id),
                     h('div', { className: 'rt-sm-node-sub' },
@@ -328,7 +515,7 @@
                     node.waiting
                       ? h('div', { className: 'rt-sm-node-wait' },
                           '在等：' + (node.waiting.reason || node.waiting.stage || node.waiting.status || '人工介入'))
-                      : null)))
+                      : null))))
               ),
               h('div', { className: 'rt-sm-detail' },
                 selected === null

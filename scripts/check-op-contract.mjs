@@ -159,10 +159,13 @@ for (const op of phantom) {
 }
 
 // C. 自有 op 必须登记
+//
+// `ops` 是「我们多出来的能力」，`aliases` 是「上游有、我们换了名字但保留了同名入口」。
+// 两类都必须登记：前者防止死代码，后者防止「名字没了却没人发现」。
+// 两者都做**反向**校验（登记了但产物里没有 → 红），否则删掉实现时台账会一直留着假条目。
 const ours = [...B].filter((op) => !union.has(op)).sort();
-const ledger = fs.existsSync(LEDGER)
-  ? JSON.parse(fs.readFileSync(LEDGER, "utf8")).ops || {}
-  : {};
+const ledgerFile = fs.existsSync(LEDGER) ? JSON.parse(fs.readFileSync(LEDGER, "utf8")) : {};
+const ledger = { ...(ledgerFile.aliases || {}), ...(ledgerFile.ops || {}) };
 for (const op of ours.filter((o) => !ledger[o])) {
   fail(`新增 op 未登记到 overlay/op-ledger.json：${op}`);
 }

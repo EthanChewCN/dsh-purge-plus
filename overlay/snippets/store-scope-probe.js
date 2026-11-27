@@ -10,8 +10,9 @@
   engagementScope(id) {
     try {
       const meta = readMeta(this.metaPathOf(id)) || {}
-      const list = Array.isArray(meta.scope_cidrs) ? meta.scope_cidrs : []
-      return list.map((x) => String(x || '').trim()).filter((x) => x !== '')
+      /* [dsh-purge-plus] 走 scopeList：历史库里可能是整串字符串或被 String() 过的对象，
+         直接 Array.isArray 判假就返回空，等于把"记过范围"说成"没记范围"。 */
+      return scopeList(meta.scope_cidrs)
     } catch { return [] }
   }
 

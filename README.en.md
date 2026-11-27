@@ -54,14 +54,14 @@ It does not change the model, the cloud account, or upload prompts and configura
 ```
 base    dsh-purge Community   MIT         host patches · patch engine · ops layer
 port    dsh-purge safe        Apache-2.0  a branch with a wider capability surface
-result  dsh-purge-plus        variant     95 patches · 50 read-only checks
+result  dsh-purge-plus        variant     96 patches · 54 read-only checks
 ```
 
 This repo is **not** a fork of community and **not** a fork of safe. It treats both upstreams as read-only inputs:
 
 - `vendor/community/` — the base, verbatim copy, read-only at build time;
 - `vendor/safe/` — the porting source, verbatim copy, used only for comparison;
-- `overlay/` — **every** change this repo makes: new files plus **309 anchor edits** (`required` 306 / `required:false` 3)
+- `overlay/` — **every** change this repo makes: new files plus **341 anchor edits** (`required` 338 / `required:false` 3)
   and **96 snippet injection points** plus 4 brand-string fixes, guarded by `verify [26]` (doc numbers must match recomputed code counts).
 
 ---
@@ -78,9 +78,10 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 | Own #206 | `SUBAGENT_INHERIT_PARENT_ACCESS` — subagents inherit the parent permission preset verbatim |
 | Own #207 | `BLANK_REUSE_KEEPS_RECORDED_PRESET` — reusing a blank session keeps the preset recorded in its log (cold path) |
 | Own #208 | `LIVE_BLANK_REUSE_KEEPS_RECORDED_PRESET` — same for a still-live blank session (live path) |
+| Own #209 | `HUNG_PROMPT_ACCEPTS_STRING_CONTRACT` — the hung-prompt hook accepts both function and string contracts, and non-string returns are no longer stringified into `[object Object]` |
 | Own module | `lib/subagent-fence.js` — a leaf subagent may not delegate further |
 | Patch engine | **30 descriptor fields**: `drift` / `fileOptional` / `requireAllTargets` / `settleWhenAbsent` / `multiHit` … |
-| Backend ops | **94** (union of both upstreams 84 + 10 own); the UI references 68, all resolvable |
+| Backend ops | **112** (union of both upstreams 84 + 24 own + 4 safe-2.0.2 compatibility aliases); the UI references 68, all resolvable |
 | Ops layer | `audit.jsonl`, cross-process maintenance lock, rollback transaction, layered self-check, runtime probe, drift detection |
 | In-app upgrade | "Check for updates" works: anonymous GitHub releases, byte-exact `SHA256SUMS.txt` verification |
 | Drill desk | Full-page settings in the sidebar + red-team fact store (SQLite), **14 tabs / 6 top-level groups** |
@@ -165,7 +166,7 @@ The repository root is **not** an installable package (there is no `package.json
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 50 read-only checks, host untouched
+node scripts/verify.mjs     # 54 read-only checks, host untouched
 ```
 
 Then as above: panel → Plugins → Install from file → pick `dist/dsh-purge-plus-<ver>.tgz` → restart DSH.
@@ -248,9 +249,9 @@ git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
 | Stage | Action | On failure |
 | :--- | :--- | :--- |
 | Swap vendor | replace `vendor/community` wholesale | — |
-| Replay overlay | apply 309 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
+| Replay overlay | apply 341 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
-| Verify | 50 read-only checks | any red → non-zero exit |
+| Verify | 54 read-only checks | any red → non-zero exit |
 
 "Exactly N hits" is a hard constraint: 0 hits means the anchor rotted after a host upgrade; ≥2 means it would patch the wrong place. Both fail the build.
 
@@ -294,16 +295,16 @@ Everything is read-only: no host writes, no state changes.
 vendor/community/          upstream base, verbatim, read-only at build time
 vendor/safe/               porting source, verbatim, comparison only
 overlay/files/             new files (copied over the product)
-  ├─ lib/patches/overlay.mjs   own patch table #201–#208
+  ├─ lib/patches/overlay.mjs   own patch table #201–#209
   ├─ lib/subagent-fence.js     leaf-agent fence
   ├─ lib/redteam/              ported modules such as team-board-views.js
   ├─ skills/redteam/           skill library (40 .md files)
   └─ NOTICE-PLUS.md            attribution and per-file change record
 overlay/snippets/          long code blocks injected into the product (tabs, charts, report rendering …)
-overlay/edits.mjs          309 anchor edits
+overlay/edits.mjs          341 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         50 read-only checks
+scripts/verify.mjs         54 read-only checks
 scripts/check-rebuild.mjs  clone-rebuild consistency (before release)
 scripts/test-*.mjs         38 behavioural regressions (run by verify [33])
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → local CVE base DB

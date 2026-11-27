@@ -198,8 +198,29 @@
         h('div', { className: 'rt-spacer' }),
         h(IntelUpdateButton, { onDone: function () { if (typeof props.onRefresh === 'function') props.onRefresh() } }))
 
+      /* 计数行（safe 的环境适配页有、我们过去只给「几天没动」）：
+         「4 天没动」说明不了规模，「14481 个模板 / 1805 条 KEV」才能。
+         后端 intelStatus 已经把 templates / kev 两个摘要算好，这里只负责显示；
+         老版本后端不返回这两个键时整行不渲染，不会出现 undefined。 */
+      const intelCounts = (intel === null || (intel.templates === undefined && intel.kev === undefined)) ? null : h('div', {
+        style: { display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, marginBottom: 8, color: 'var(--dsw-alias-label-secondary)' },
+      },
+        intel.templates ? h('span', null,
+          'nuclei 模板 ' + (intel.templates.count ? intel.templates.count + ' 个' : '未安装')
+          + (intel.templates.refreshed_at
+            ? '（上次刷新 ' + Math.round(Number(intel.templates.age_hours) || 0) + ' 小时前）'
+            : '（从未刷新记录）')
+          + (intel.templates.owned ? ' · 插件自己那份，可刷新' : ' · 外部目录，不碰')
+          + (intel.templates.last_error ? ' · 上次错误：' + intel.templates.last_error : '')) : null,
+        intel.kev ? h('span', null,
+          'CISA KEV ' + (intel.kev.available
+            ? intel.kev.count + ' 条' + (intel.kev.stale ? '（过期）' : '')
+            : '不可用')
+          + (intel.kev.note ? ' · ' + intel.kev.note : '')) : null)
+
       return h('div', { className: 'rt-pane' },
         intelBadge,
+        intelCounts,
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 } },
           cell('资产', stats.assets !== undefined ? stats.assets : counts.assets),
           cell('漏洞', stats.vulns !== undefined ? stats.vulns : counts.vulns),
