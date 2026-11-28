@@ -52,6 +52,19 @@ function clonePackage() {
   return dir;
 }
 
+/** 临时目录清理。macOS 上 rmSync 有已知竞态：目录刚被写过的瞬间删会抛 ENOTEMPTY，
+    而 force:true 只吞 ENOENT。以前这个异常从 finally 里冒出来，把整轮门禁判成失败
+    —— 失败原因与变异毫无关系，看起来像「某个变异没被检出」。重试几次，仍失败只警告。 */
+function rmTemp(dir) {
+  for (let i = 0; i < 6; i += 1) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); return; }
+    catch (e) {
+      if (i === 5) { console.warn(`  ! 临时目录未能清理（${e.code}）：${dir}`); return; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 80 * (i + 1));
+    }
+  }
+}
+
 /** 在副本里跑一个回归脚本，返回 { code, out }。 */
 function runTest(dir, script) {
   try {
@@ -140,7 +153,7 @@ for (const m of picked) {
       console.log(`  ✗ ${m.id} 未被检出（${m.test}：${why}）`);
     }
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 }
 

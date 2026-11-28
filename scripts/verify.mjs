@@ -2377,7 +2377,10 @@ console.log("[46] 故障注入（改坏一处行为，指定回归必须变红�
       ? ok(`${m[2]} 个变异全部被检出`)
       : bad(`变异未被全部检出：${(m ? m[0] : out.slice(-200))}`);
   } catch (e) {
-    bad(`故障注入门禁失败：${String(e.stdout || e.message || "").split("\n").slice(-4).join(" ")}`);
+    // 失败时要把 stderr 也带上：只取 stdout 会把「脚本崩在哪」这件事一起吞掉，
+    // 上一版就是这样只看到「前三个变异被检出」而不知道后面发生了什么。
+    const tail = (t) => String(t || "").split("\n").filter(Boolean).slice(-6).join(" | ");
+    bad(`故障注入门禁失败：${tail(e.stdout) || String(e.message || "")}${e.stderr ? " · stderr: " + tail(e.stderr) : ""}`);
   }
 }
 
