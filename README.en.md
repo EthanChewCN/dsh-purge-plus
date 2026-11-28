@@ -70,7 +70,7 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 
 | Layer | Content |
 | :--- | :--- |
-| **Host patches** | **96** = 88 upstream + 8 own (id ≥ 201, all listed below) |
+| **Host patches** | **96** = 74 upstream 1.7.24 + 14 retired-but-retained + 8 own (id ≥ 201, all listed below) |
 | Own #201 | `PRODUCT_ANALYTICS_DEFAULT_OFF` — product analytics off by default |
 | Own #202 | `PRODUCT_TELEMETRY_OTEL_NOOP` — product telemetry OTLP exporter becomes a no-op |
 | Own #203 | `SESSION_TELEMETRY_OTEL_DISABLED` — session telemetry defaults to `DISABLED` |
