@@ -8,6 +8,13 @@
       "tarballBytes": 2264596,
       "contentDigest": "674c34f6178f4902d8eab5bc61f3193d58784ff2993f01a5529af550465a3fae",
       "note": "2026-11-23 实测：tarball sha256 与上游 release 的 SHA256SUMS.txt 逐字相同；解包后 369 个文件，与本仓库 vendor/community 逐字节一致（diff -rq 输出 0 行）。"
+    },
+    "dsh-purge-community@1.7.24": {
+      "source": "https://github.com/kingcharleslzy-ai/dsh-purge/releases/download/v1.7.24/dsh-purge-community-1.7.24.tgz",
+      "tarballSha256": "585ae6bb4c5027df58bc039bfbfdeb227dfa6f95046f581d7d8315693198e245",
+      "tarballBytes": 2075379,
+      "contentDigest": "c42dba4b2016584785c8164194e8e3e680139aeed26944d0f926de9ff3eaf3aa",
+      "note": "2026-11-28 实测：tarball sha256 与上游 release 的 SHA256SUMS.txt 逐字相同；解包后 381 个文件，与本仓库 vendor/community 逐字节一致。1.7.24 是破坏性版本：删掉 14 条执行边界补丁（88 → 74），本包把它们接成 retained.mjs 保留。"
     }
   },
   "reference": {
@@ -24,9 +31,30 @@
   },
   "auditBaselines": {
     "_about": "溯源用的 commit。社区仓 v1.7.20 tag 与 release tgz 内容一致；master 在 tag 之后另有未发版提交（见 scripts/check-vendor-drift.mjs 的说明）。",
-    "community@v1.7.20": { "repo": "kingcharleslzy-ai/dsh-purge", "tag": "v1.7.20", "commit": "64613e927c67" },
-    "community@master": { "repo": "kingcharleslzy-ai/dsh-purge", "commit": "e519253d5b01344056055af9d2041dcafa42fed3", "note": "2026-11-18；比 tag 多 10 个提交，未发版" },
-    "safe@v2.0.0": { "repo": "CallMeGuLab/dsh-purge-safe", "tag": "v2.0.0", "commit": "d96c5f25ee40" },
-    "safe@v2.0.2": { "repo": "CallMeGuLab/dsh-purge-safe", "tag": "v2.0.2", "commit": "29bf73a96289" }
+    "community@v1.7.20": {
+      "repo": "kingcharleslzy-ai/dsh-purge",
+      "tag": "v1.7.20",
+      "commit": "64613e927c67"
+    },
+    "community@master": {
+      "repo": "kingcharleslzy-ai/dsh-purge",
+      "commit": "e519253d5b01344056055af9d2041dcafa42fed3",
+      "note": "2026-11-18；比 tag 多 10 个提交，未发版"
+    },
+    "safe@v2.0.0": {
+      "repo": "CallMeGuLab/dsh-purge-safe",
+      "tag": "v2.0.0",
+      "commit": "d96c5f25ee40"
+    },
+    "safe@v2.0.2": {
+      "repo": "CallMeGuLab/dsh-purge-safe",
+      "tag": "v2.0.2",
+      "commit": "29bf73a96289"
+    },
+    "community@v1.7.24": {
+      "repo": "kingcharleslzy-ai/dsh-purge",
+      "tag": "v1.7.24",
+      "commit": "pending-verify"
+    }
   }
 }

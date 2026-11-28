@@ -21,6 +21,8 @@ export const OVERLAY_PATCHES = [
     file: ["product-analytics"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     replacements: [
       {
         pattern: "enabled: z.boolean().default(true).volatile(),",
@@ -49,6 +51,8 @@ export const OVERLAY_PATCHES = [
     file: ["product-telemetry-otel"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     replacements: [
       {
         pattern:
@@ -75,6 +79,8 @@ export const OVERLAY_PATCHES = [
     file: ["session-telemetry-otel"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     replacements: [
       {
         pattern: "const DEFAULT_TELEMETRY_MODE = SessionTelemetryMode.FEEDBACK_ONLY;",
@@ -109,6 +115,8 @@ export const OVERLAY_PATCHES = [
     file: ["session-log-deepseek"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     replacements: [
       {
         pattern:
@@ -146,6 +154,8 @@ export const OVERLAY_PATCHES = [
     file: ["subagent"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     replacements: [
       {
         pattern:
@@ -182,6 +192,8 @@ export const OVERLAY_PATCHES = [
     file: ["api-session-controller"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     replacements: [
       {
         expect: 1,
@@ -227,6 +239,8 @@ export const OVERLAY_PATCHES = [
     file: ["api-session-controller"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     replacements: [
       {
         expect: 1,
@@ -281,6 +295,8 @@ export const OVERLAY_PATCHES = [
     file: ["agent-loop"],
     optional: true,
     skipIfMarked: true,
+    // 1.7.24 起：锚点不在时算「本端不需要」，不再落进 pending（settleWhenAbsent 是上游自带机制）
+    settleWhenAbsent: true,
     // 级联：209 的锚点是 88 打完之后的产物；88 没落地前不报漂移。
     chainedAfter: 88,
     replacements: [

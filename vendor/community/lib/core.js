@@ -1,10 +1,12 @@
+import { summarizePatchRows } from "./patch-state.mjs";
+import { inspectRetiredPermissions, recoverRetiredPermissions, retiredRulesFor } from "./retired-permissions.mjs";
 import { inspectPermissionMigration } from "./permission-migration.mjs";
 import { restoreBackupFile, restoreBackupFileSync } from "./restore-backup.js";
 import { memoDesktopRead, withDesktopReadScope, clearDesktopReadScope } from "./desktop-read-scope.js";
 import { resolveDesktopEntry } from "./desktop-entry.js";
 import { removeTreeNoFollowSync } from "./remove-tree.js";
 import { desktopResourcesForHost, resolveInstance } from './instance.js';
-import { liangshenRoots, liangshenPresence } from './preset-presence.js';
+import { liangshenRoots, liangshenInventory, liangshenReport } from './preset-presence.js';
 import { scheduleDesktopHandoff } from './desktop-handoff.js';
 import { STEERING_RESTORE_PATCH, nativeSteeringRestored } from "./steering.js";
 import { hostLayoutEvidence } from "./host-layout.js";
@@ -2642,6 +2644,12 @@ export function patchedTargetStillPatched(original, content, aiBase = _patchTarg
   // 找不到归属时宁可不动 bak，避免把备份冲掉。
   if (keys.length === 0) return true;
   const before = asLf(baseline.toString());
+  const retired = retiredRulesFor(keys);
+  if (retired.length) {
+    try {
+      if (recoverRetiredPermissions(before, raw, retired, original) !== raw) return true;
+    } catch { return true; } // Never refresh the only baseline when ownership is uncertain.
+  }
   let hasVendorAnchor = false;
   for (const p of ALL_PATCHES) {
     if (!fileKeysOf(p).some((key) => keys.includes(key))) continue;
@@ -2697,8 +2705,21 @@ export function refreshStaleBaksForUpgrade(aiBase) {
   return refreshed;
 }
 
+// Verify retired permission edits before a backup can be created or refreshed.
+function checkRetiredPermissions(aiBase, files, save) {
+  const sourceRoot = packageRootFromAiBase(aiBase);
+  const roots = sourceRoot ? [aiBase, path.join(sourceRoot, "packages")] : [aiBase];
+  const isKnownRemainder = (before, after, file) => {
+    const relevant = ALL_PATCHES.filter(p => fileKeysOf(p).some(key => pathsOf(files,key).includes(file)));
+    return [relevant, relevant.filter(p=>patchApplied(after,p))].some(group =>
+      group.reduce((text,p)=>applyReplacementsToText(text,p,file).text,before) === after);
+  };
+  return inspectRetiredPermissions({files,roots,save,isKnownRemainder});
+}
+
 export async function backupAll(aiBase) {
   const files = targetFiles(aiBase);
+  await checkRetiredPermissions(aiBase,files);
   const made = [];
   const errors = [];
   const skippedUser = [];
@@ -2744,6 +2765,7 @@ async function sameFileBytes(left, right) {
 }
 
 export async function revertAll(aiBase, options = {}) {
+  await checkRetiredPermissions(aiBase,targetFiles(aiBase),saveText);
   const errors = [];
   restoreMissingOriginalsFromBak(aiBase, {errors});
   const files = targetFiles(aiBase);
@@ -2856,7 +2878,7 @@ function nestedTargetFiles(aiBase) {
   };
 }
 
-export function targetFiles(aiBase, dshHome = findDshHome()) {
+export function targetFiles(aiBase, dshHome = findDshHome(), liangshenPackageFiles) {
   const prevTarget = _patchTargetAiBase;
   _patchTargetAiBase = aiBase || null;
   try {
@@ -3009,7 +3031,7 @@ export function targetFiles(aiBase, dshHome = findDshHome()) {
       ...(root ? [path.join(root, "packages", "pwsh", "tool-pwsh", "lib", "index.js")] : []),
     ]),
     "preset-liangshen": allExisting([path.join(dshHome, ".agent-presets/liangshen/agent.cordis.yml")]),
-    "preset-liangshen-pkg": allExisting(liangshenRoots(dshHome).slice(1).map(root => path.join(root, "agent.cordis.yml"))),
+    "preset-liangshen-pkg": allExisting(liangshenPackageFiles ?? liangshenRoots(dshHome).slice(1).map(root => path.join(root, "agent.cordis.yml"))),
     "liangshen-tool-bootstrap": listLiangshenBootstrapFiles(dshHome),
     "persona": allExisting([
       ...nestedPkg(aiBase, "dsh-persona", "lib", "index.js"),
@@ -3474,6 +3496,7 @@ export async function applyPatches(aiBase, patches = ALL_PATCHES, options = {}) 
     snapshot = `error:${e && e.message ? e.message : e}`;
     console.warn("[dsh-purge] profile snapshot before apply failed:", snapshot);
   }
+  await checkRetiredPermissions(aiBase,targetFiles(aiBase),saveText);
   restoreMissingOriginalsFromBak(aiBase);
   refreshStaleBaksForUpgrade(aiBase);
   const files = targetFiles(aiBase);
@@ -3719,8 +3742,7 @@ function locateAnchor(text, pattern) {
 }
 
 export async function patchDrift(aiBase, patches = ALL_PATCHES, options = {}) {
-  const files = targetFiles(aiBase, options.dshHome ?? findDshHome());
-  const status = await patchStatus(aiBase, patches, options);
+  const {status, files: evidence, targets: files} = await patchStatusDetail(aiBase, patches, options);
   const drifted = [];
   const optionalDrift = [];
   const chained = [];
@@ -3730,12 +3752,20 @@ export async function patchDrift(aiBase, patches = ALL_PATCHES, options = {}) {
     if (!patchAppliesHere(p, options.surface)) continue;
     checked += 1;
     const st = status[p.id];
-    if (st === "applied" || st === "already" || st === "na" || st === "disabled") continue;
+    if (st === "applied" || st === "already" || st === "na" || st === "disabled" || (p.id === 76 && st === "not_needed")) continue;
     // 撤销型补丁（把插件以前加进宿主的东西删掉）：宿主里本来就没有，等于已经到位。
     if (p.settleWhenAbsent && st === "skipped") continue;
     // 级联补丁：前置补丁这一轮还没落地时，锚点本来就还不存在，不算漂移。
     if (p.chainedAfter && !["applied", "already"].includes(status[p.chainedAfter])) {
       chained.push({ id: p.id, name: p.name, after: p.chainedAfter });
+      continue;
+    }
+    if (p.id === 71) {
+      const rows = evidence[p.id];
+      if (st !== "pending") {
+        const anchors = rows.filter(row => row.status !== "applied").map(row => ({file:row.path, reason:row.status, head:""}));
+        (st === "missing_file" ? missing : drifted).push({id:p.id, name:p.name, layer:p.layer, optional:false, status:st, files:rows, anchors});
+      }
       continue;
     }
     const anchors = [];
@@ -3845,11 +3875,29 @@ function permissionMigration(aiBase, files, patches, gate, save) {
   return inspectPermissionMigration({ files, all: ALL_PATCHES, disabled, roots, fs, save });
 }
 
+function presetInventoryForHost(home, surface) {
+  return liangshenInventory(home, fs, fp => allowTargetPath(fp, surface));
+}
+
+export function liangshenStatusForHost(home, surface) {
+  return liangshenReport(home, undefined, presetInventoryForHost(home, surface));
+}
+
 async function readPatchReport(aiBase, patches, options) {
-  const files = targetFiles(aiBase, options.dshHome ?? findDshHome());
+  const home = options.dshHome ?? findDshHome();
+  const inventory = presetInventoryForHost(home, options.surface ?? detectSurface());
+  const files = targetFiles(aiBase, home, inventory.targets.filter(t => t.key === "preset-liangshen-pkg").map(t => t.path));
   const gate = patchGateOf(options);
   const migration = await permissionMigration(aiBase, files, patches, gate);
   const status = {};
+  let legacyPermissions;
+  try {
+    const paths = await checkRetiredPermissions(aiBase,files);
+    if (paths.length) legacyPermissions = {status:"pending", message:paths.join("\n")};
+  } catch (error) {
+    legacyPermissions = {status:"unmatched", message:error.message};
+  }
+  if (legacyPermissions) status.legacyPermissions = legacyPermissions.status;
   const detail = {};
   for (const p of patches) {
     detail[p.id] = [];
@@ -3862,6 +3910,12 @@ async function readPatchReport(aiBase, patches, options) {
     if (!patchEnabled(p, gate)) {
       detail[p.id] = migration.get(p.id) || [];
       status[p.id] = detail[p.id].some(row => row.error) ? "unmatched" : detail[p.id].length ? "pending" : "disabled";
+      continue;
+    }
+    if (p.id === 71) {
+      const report = await liangshenReport(home, p, inventory);
+      status[p.id] = report.status;
+      detail[p.id] = report.files;
       continue;
     }
     const keys = fileKeysOf(p);
@@ -3885,17 +3939,9 @@ async function readPatchReport(aiBase, patches, options) {
           text = await loadText(fp);
         } catch {
           detail[p.id].push({ key, path: fp, status: "unreadable" });
-          if (p.id === 71 || p.requireAllTargets) unreadable += 1;
+          if (p.requireAllTargets) unreadable += 1;
           else pending += 1;
           continue;
-        }
-        // A malformed installed preset is not evidence of a successful patch.
-        if (p.id === 71) {
-          try {
-            // Keep clean-install CLI bootstrap independent of runtime dependencies.
-            const { parseDocument } = await import("yaml");
-            if (parseDocument(text).errors.length) { unmatched += 1; detail[p.id].push({ key, path: fp, status: "unmatched" }); continue; }
-          } catch { unreadable += 1; continue; }
         }
         let outcome = filePatchOutcome(text, p, fp);
         // 显式声明为 fileOptional 的目标不参与判定：它的逻辑在新版宿主里已搬走。
@@ -3929,7 +3975,6 @@ async function readPatchReport(aiBase, patches, options) {
     const partial = !!p.fileAllRequired && applied > 0
       && requiredKeys.some((key) => pathsOf(files, key).length > 0 && !settledKeys.has(key));
     if (unreadable > 0) status[p.id] = "unknown";
-    else if (p.id === 71 && unmatched > 0) status[p.id] = "unmatched";
     else if (pending > 0) status[p.id] = "pending";
     else if (partial || (p.requireAllTargets && applied > 0 && (missing || unmatched || drifted))) status[p.id] = "partial";
     else if (applied > 0) status[p.id] = "applied";
@@ -3937,18 +3982,23 @@ async function readPatchReport(aiBase, patches, options) {
     else if (unmatched > 0) status[p.id] = "unmatched";
     else if (skipped > 0) status[p.id] = "skipped";
     else status[p.id] = p.optional ? "na" : "missing_file";
-    if (p.id === 71 && status[p.id] === "missing_file") {
-      const presence = liangshenPresence(options.dshHome ?? findDshHome());
-      if (presence === "absent") status[p.id] = "na";
-      else if (presence === "unknown") status[p.id] = "unknown";
+
+  }
+  // The existing #76 refinement used to run only in selfcheck, giving the same
+  // file different denominators in the panel and CLI. Resolve it before aggregation.
+  if (status[76] === "skipped") {
+    try {
+      const { refinePresetDiagnostic } = await import("./preset-diagnostic.js");
+      Object.assign(status, refinePresetDiagnostic(status, home));
+    } catch {
+      status[76] = "unknown";
     }
   }
   await hooksDeny.annotateHookDenyStatus(status, getHooksDenySettings(), aiBase, hookDenyIo);
-  return { status, files: detail };
+  return { status, files: detail, targets: files, legacyPermissions };
 }
 
-export async function hasBackup(aiBase) {
-  const files = targetFiles(aiBase);
+export async function hasBackup(aiBase, files = targetFiles(aiBase)) {
   for (const fp of flattenTargetPaths(files)) {
     if (isUserProfilePatchFile(fp)) continue;
     if (fs.existsSync(fp + ".dshpurge.bak")) return true;
@@ -3956,7 +4006,7 @@ export async function hasBackup(aiBase) {
   return false;
 }
 
-function isTextShim(fp) {
+function isTextShim(fp, reportReadError = false) {
   // H18:只读前 512 字节。readFileSync 整文件把 PATH 上几 MB 的 exe 全载进来会 OOM 并拖慢扫描。
   let fd;
   const io = fsFor(fp);
@@ -3968,7 +4018,8 @@ function isTextShim(fp) {
     if (slice.includes(0)) return false;
     const head = slice.subarray(0, Math.min(120, n)).toString("utf8");
     return head.startsWith("#!") || /@echo/i.test(head) || head.startsWith("REM ") || head.startsWith("# ");
-  } catch {
+  } catch (error) {
+    if (reportReadError) throw error;
     return false;
   } finally {
     if (fd !== undefined) { try { io.closeSync(fd); } catch { /* ignore */ } }
@@ -4132,9 +4183,17 @@ export function shimIsPatched(fp) {
 }
 
 export function shimFileStatus(fp) {
-  if (!isFile(fp)) return "missing";
-  if (!isTextShim(fp)) return "binary";
-  return shimIsPatched(fp) ? "patched" : "original";
+  try {
+    if (!fsFor(fp).statSync(fp).isFile()) return "missing";
+    if (!isTextShim(fp, true)) return "binary";
+    const text = fsFor(fp).readFileSync(fp, "utf8");
+    const entry = desktop.cliEntryMarkerStatus(text);
+    if (entry === "cli_entry_incomplete") return entry;
+    if (text.includes("dsh-purge shim")) return "patched";
+    return entry || "original";
+  } catch (error) {
+    return error.code === "ENOENT" || error.code === "ENOTDIR" ? "missing" : "unreadable";
+  }
 }
 
 function scrubInBinBak(dir, name, cleaned) {
@@ -4672,33 +4731,19 @@ async function readGatherState(options) {
   const aiBase = Object.hasOwn(options, "aiBase") ? options.aiBase : findAiBase();
   const shimDir = findShimDir();
   const desktop_runtimes = listDesktopCommandRuntimeDirs();
-  const files = aiBase ? targetFiles(aiBase, dshHome) : {};
-  const patchReport = aiBase ? await patchStatusDetail(aiBase, ALL_PATCHES, {dshHome, surface:options.surface}) : {status:{}, files:{}};
+  const patchReport = aiBase ? await patchStatusDetail(aiBase, ALL_PATCHES, {dshHome, surface:options.surface}) : {status:{}, files:{}, targets:{}};
+  const files = patchReport.targets;
   const patch_status = patchReport.status;
   const patch_files = patchReport.files;
-  let patches_applied = 0;
-  let patches_pending = 0;
-  let patches_skipped = 0;
-  let patches_ready = 0;
-  let patches_na = 0;
-  let patches_total = 0;
-  for (const p of ALL_PATCHES) {
-    // 还没定位到宿主时不计入分母，避免界面出现吓人的 0/63。
-    if (!aiBase) {
-      patches_na += 1;
-      continue;
-    }
-    const s = patch_status[p.id];
-    if (s === "na" || (!patchAppliesHere(p, options.surface) && (p.id !== 91 || !s))) {
-      patches_na += 1;
-      continue;
-    }
-    patches_total += 1;
-    if (s === "applied") patches_applied += 1;
-    if (s === "pending") patches_pending += 1;
-    if (s === "skipped" || s === "missing_file" || s === "off") patches_skipped += 1;
-    if (patchStatusReady(s, p)) patches_ready += 1;
-  }
+  const counts = summarizePatchRows(ALL_PATCHES.map(p => ({
+    ...p, status: !aiBase ? "na" : patch_status[p.id],
+  })));
+  const patches_applied = counts.applied;
+  const patches_pending = counts.pending;
+  const patches_skipped = counts.skipped;
+  const patches_ready = counts.applied;
+  const patches_na = counts.not_applicable;
+  const patches_total = counts.total;
   const display_patches = aiBase ? groupPatchesForDisplay(ALL_PATCHES, patch_status, options.surface) : [];
   const displayTally = tallyDisplayPatches(display_patches);
   let shim_cmd = "missing";
@@ -4732,6 +4777,7 @@ async function readGatherState(options) {
     files,
     patch_status,
     patch_files,
+    legacyPermissions: patchReport.legacyPermissions,
     patches_applied,
     patches_pending,
     patches_skipped,
@@ -4744,7 +4790,7 @@ async function readGatherState(options) {
     display_skipped: displayTally.skipped,
     display_ready: displayTally.ready,
     display_total: displayTally.total,
-    has_backup: aiBase ? await hasBackup(aiBase) : false,
+    has_backup: aiBase ? await hasBackup(aiBase, files) : false,
     shim_cmd,
     shim_ps1,
     shim_bin,

@@ -61,7 +61,7 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 
 - `vendor/community/` — the base, verbatim copy, read-only at build time;
 - `vendor/safe/` — the porting source, verbatim copy, used only for comparison;
-- `overlay/` — **every** change this repo makes: new files plus **341 anchor edits** (`required` 338 / `required:false` 3)
+- `overlay/` — **every** change this repo makes: new files plus **298 anchor edits** (`required` 295 / `required:false` 3)
   and **96 snippet injection points** plus 4 brand-string fixes, guarded by `verify [26]` (doc numbers must match recomputed code counts).
 
 ---
@@ -101,7 +101,7 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 | Drift detection | **16 sites**, can say *why* a patch did not apply | none | takes community |
 | Ops layer | **15 modules / 1,441 lines** | slim | takes community |
 | Update channel | **works** | repo coordinates left blank | takes community, repointed here |
-| Patch coverage | 88 | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | 96 (88 + 8 own) |
+| Patch coverage | 88 (1.7.20) / **74 (1.7.24+)** | 59 (2.0.0) / 62 (2.0.1) / 64 (2.0.2) | **96** (74 + 14 retained + 8 own) |
 | Runtime hooks | 10 events | **13 events** | on demand |
 | Host write elevation | none | **`ensureHostWritable` suite** | not ported (see below) |
 | Drill desk | 10 tabs | 12 tabs + 6 groups | **14 tabs / 6 groups** (includes "credentials & files" and the task board) |
@@ -249,7 +249,7 @@ git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
 | Stage | Action | On failure |
 | :--- | :--- | :--- |
 | Swap vendor | replace `vendor/community` wholesale | — |
-| Replay overlay | apply 341 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
+| Replay overlay | apply 298 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
 | Verify | 54 read-only checks | any red → non-zero exit |
 
@@ -277,7 +277,7 @@ All 54 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (t
 | 6 | Entry loads under DSH's resolution context | export shape changed |
 | 7 | Update channel (tag whitelist / version compare / asset name / coordinate leftovers) | in-app upgrade would break |
 | 8 | `cordis.patch.yml` plugin name matches the package name | bundle would be silently skipped |
-| 26 | Doc numbers vs recomputed code counts (341 / 96 / 88 / 96) | the docs started lying |
+| 26 | Doc numbers vs recomputed code counts (298 / 96 / 74 / 14 / 8) | the docs started lying |
 | 28 | Op contract (upstream union 84 vs product 112) | an upstream capability is missing, or the UI names a wrong op |
 | 32 | Docs vs product (tab count / group count / own-patch list / dead file references) | the README describes something the product does not have |
 | 33 | Regression roll-up (all 42 `test-*.mjs` run together) | behaviour is broken while verification stays green |
@@ -301,7 +301,7 @@ overlay/files/             new files (copied over the product)
   ├─ skills/redteam/           skill library (40 .md files)
   └─ NOTICE-PLUS.md            attribution and per-file change record
 overlay/snippets/          long code blocks injected into the product (tabs, charts, report rendering …)
-overlay/edits.mjs          341 anchor edits
+overlay/edits.mjs          298 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         54 read-only checks

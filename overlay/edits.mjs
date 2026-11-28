@@ -50,7 +50,8 @@ export function buildEdits(repo = resolveRepo()) {
       find: "import { STABILITY_PATCHES } from './stability.mjs';",
       replace:
         "import { STABILITY_PATCHES } from './stability.mjs';\n" +
-        "import { OVERLAY_PATCHES } from './overlay.mjs'; // [dsh-purge-plus]",
+        "import { OVERLAY_PATCHES } from './overlay.mjs'; // [dsh-purge-plus]\n" +
+        "import { RETAINED_PATCHES } from './retained.mjs'; // [dsh-purge-plus] 上游 1.7.24 退役的执行边界层",
     },
     {
       file: "lib/patches/index.mjs",
@@ -58,7 +59,25 @@ export function buildEdits(repo = resolveRepo()) {
       find:
         "export const ALL_PATCHES = [...PATCHES, ...CODE_PATCHES, ...ENGINE_PATCHES, ...NEW_TOOL_PATCHES, ...OPT_IN_PATCHES, ...STABILITY_PATCHES];",
       replace:
-        "export const ALL_PATCHES = [...PATCHES, ...CODE_PATCHES, ...ENGINE_PATCHES, ...NEW_TOOL_PATCHES, ...OPT_IN_PATCHES, ...STABILITY_PATCHES, ...OVERLAY_PATCHES]; // [dsh-purge-plus]",
+        "export const ALL_PATCHES = [...PATCHES, ...CODE_PATCHES, ...ENGINE_PATCHES, ...NEW_TOOL_PATCHES, ...OPT_IN_PATCHES, ...STABILITY_PATCHES, ...OVERLAY_PATCHES, ...RETAINED_PATCHES]; // [dsh-purge-plus]",
+    },
+
+    // ══ A2. 禁用 1.7.24 的「退役补丁剥离」迁移 ══════════════════════
+    // 1.7.24 删掉 14 条执行边界补丁后，backupAll() 会先跑 inspectRetiredPermissions，
+    // 把宿主文件里这 14 条留下的痕迹按 digest 逐段还原成官方原文——也就是在每次
+    // 备份前主动把它们擦掉。本包把这 14 条接成自有补丁（retained.mjs），
+    // 迁移必须停掉，否则「打了又被擦」会在状态页表现为 14 条永远未应用。
+    // 只清空 rules 数组：inspectRetiredPermissions 遍历 rules、retiredRulesFor 过滤 rules，
+    // 两处同时变空操作，模块其余导出与 import 保持可用。
+    {
+      file: "lib/retired-permissions.mjs",
+      required: true,
+      find:
+        'const rules = JSON.parse(\n' +
+        '  fs.readFileSync(new URL("./retired-permissions.json", import.meta.url)),\n' +
+        ');',
+      replace:
+        'const rules = []; // [dsh-purge-plus] 14 条退役补丁在本包保留，禁用剥离迁移（见 patches/retained.mjs 头注释）',
     },
 
     // ══ B. 宿主文件键表补 4 项（遥测三件 + office）═══════════════════
@@ -331,43 +350,10 @@ export function buildEdits(repo = resolveRepo()) {
     // 原版遍历 profiles 里的每一项去读 <name>/package.json，读 .DS_Store/package.json
     // 抛 ENOTDIR，而这里只放行 ENOENT → 外层 catch 把整个探测吞成 "unknown"，
     // #76 于是永远无法静态核对（自检面板里「官方身份剥离」这一层显示 unknown）。
-    {
-      file: "lib/preset-presence.js",
-      required: true,
-      find: "    for (const name of names) {",
-      replace:
-        "    for (const name of names) {\n" +
-        '      if (name.startsWith(".")) continue; // [dsh-purge-plus] 跳过 .DS_Store 等隐藏项',
-    },
-    {
-      file: "lib/preset-presence.js",
-      required: true,
-      find: '        if (e.code === "ENOENT") continue;',
-      replace:
-        '        // [dsh-purge-plus] .DS_Store 是文件，读它的 package.json 抛 ENOTDIR；\n' +
-        '        // 只放行 ENOENT 会让整个探测退化成 unknown。\n' +
-        '        if (e.code === "ENOENT" || e.code === "ENOTDIR") continue;',
-    },
     // F-2：真正的病灶在这里。liangshenRoots 遍历 profiles 下的每一项拼候选路径，
     // profiles 里混着 macOS 的 .DS_Store（文件），拼出来的
     // .DS_Store/node_modules/... 用 lstatSync 探测会抛 ENOTDIR，
     // 而下面的 catch 只放行 ENOENT → 整个 liangshenPresence 退化成 "unknown"。
-    {
-      file: "lib/preset-presence.js",
-      required: true,
-      find: "  for (const name of profiles) {",
-      replace:
-        "  for (const name of profiles) {\n" +
-        '    if (name.startsWith(".")) continue; // [dsh-purge-plus] .DS_Store 不是 profile',
-    },
-    {
-      file: "lib/preset-presence.js",
-      required: true,
-      find: '          if (e.code !== "ENOENT") throw e;',
-      replace:
-        '          // [dsh-purge-plus] ENOTDIR = 这个「profile」其实是文件（.DS_Store）\n' +
-        '          if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;',
-    },
 
     // ══ G. P0：静默失败四件 ══════════════════════════════════════════
     // 共同点：**读代码看不出来，跑起来也不报错**，只是行为悄悄不对。
@@ -1344,49 +1330,9 @@ export function buildEdits(repo = resolveRepo()) {
     //
     // 顺带修掉一处老碰撞：off 与 skipped 都走 status.skipped（都显示「跳过」）。
     // status.off（已关闭）一直存在于 locale 里但没人用，这里把它接上。
-    {
-      file: "client.js",
-      required: true,
-      find: '  if (st === "off") return t("status.skipped");',
-      replace: '  if (st === "off") return t("status.off"); // [dsh-purge-plus] 与 skipped 区分',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  if (st === "skipped") return t("health.na");',
-      replace: '  if (st === "skipped") return t("status.skipped"); // [dsh-purge-plus]',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  if (st === "missing_file") return t("health.na");',
-      replace: '  if (st === "missing_file") return t("status.missing_file"); // [dsh-purge-plus]',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  if (st === "na") return t("health.na");',
-      replace: '  if (st === "na") return t("status.na"); // [dsh-purge-plus]',
-    },
     // 中文词条：status.missing_file 原来不存在，新增。缺=7F3A 目=76EE 标=6807
     // 文=6587 件=4EF6。
-    {
-      file: "client.js",
-      required: true,
-      find: '  "status.na": "\\u672C\\u7AEF\\u4E0D\\u9700\\u8981",\n',
-      replace:
-        '  "status.na": "\\u672C\\u7AEF\\u4E0D\\u9700\\u8981",\n' +
-        '  "status.missing_file": "\\u7F3A\\u76EE\\u6807\\u6587\\u4EF6",\n',
-    },
     // 英文词条
-    {
-      file: "client.js",
-      required: true,
-      find: '  "status.na": "Not for this host",\n',
-      replace:
-        '  "status.na": "Not for this host",\n' +
-        '  "status.missing_file": "Target missing",\n',
-    },
 
     // ══ J. 补丁明细首列：#35 被挤成竖排三行 ═════════════════════════
     // 截图里「#3 / 5」竖着排，是因为 .dshpp-id 定宽 42px 而页面样式把 td 的
@@ -1422,34 +1368,9 @@ export function buildEdits(repo = resolveRepo()) {
     //   · 灰 = 没落地（na / skipped / missing_file 一致）
     //   · 虚线 = 额外区分「本来就不需要」与「需要但没成」
     // 与已有的 .dshpp-tile.is-na（四格指标里那格）保持同一套视觉语汇。
-    {
-      file: "client.js",
-      required: true,
-      find: '  if (st === "na") return "ok";',
-      replace: '  if (st === "na") return "na"; // [dsh-purge-plus] 灰虚线：本端不需要 ≠ 已生效',
-    },
     // 基础胶囊样式：is-miss 之后补 is-na（灰 + 虚线）
-    {
-      file: "client.js",
-      required: true,
-      find: ".dshpp-pill.is-miss {\\n  color: var(--dshpp-mute);\\n}",
-      replace:
-        ".dshpp-pill.is-miss {\\n  color: var(--dshpp-mute);\\n}\\n" +
-        ".dshpp-pill.is-na {\\n  color: var(--dshpp-mute);\\n  border-style: dashed;\\n}",
-    },
     // 页面作用域那份：它给 is-ok / is-wait / is-bad 各自定了描边色，
     // 但没定 is-na，会退回 .dshpp-page .dshpp-pill 的实线灰——虚线就丢了。
-    {
-      file: "client.js",
-      required: true,
-      find:
-        ".dshpp-page .dshpp-pill.is-bad {\\n  color: var(--dshpp-bad);\\n" +
-        "  border-color: color-mix(in srgb, var(--dshpp-bad) 40%, transparent);\\n}",
-      replace:
-        ".dshpp-page .dshpp-pill.is-bad {\\n  color: var(--dshpp-bad);\\n" +
-        "  border-color: color-mix(in srgb, var(--dshpp-bad) 40%, transparent);\\n}\\n" +
-        ".dshpp-page .dshpp-pill.is-na {\\n  color: var(--dshpp-mute);\\n  border-style: dashed;\\n}",
-    },
 
     // ══ L. 状态胶囊的列位置 + 「跳过」的原因文案 ═════════════════════
     // 用户截图反馈两件事：
@@ -1488,36 +1409,11 @@ export function buildEdits(repo = resolveRepo()) {
         "}\\n';",
     },
     // 「跳过」不再是「文件不在」的同义词。中文词条。
-    {
-      file: "client.js",
-      required: true,
-      find: '  "hint.skipped": "\\u76EE\\u6807\\u6587\\u4EF6\\u4E0D\\u5728\\u672C\\u5B89\\u88C5\\u91CC\\u3002",',
-      replace: '  "hint.skipped": "\\u672C\\u673A\\u6CA1\\u6709\\u8FD9\\u6761\\u8865\\u4E01\\u8981\\u5904\\u7406\\u7684\\u5185\\u5BB9\\uFF0C\\u5DF2\\u58F0\\u660E\\u53EF\\u8DF3\\u8FC7\\u3002",',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  "hint.skipped": "Target file is not part of this install.",',
-      replace: '  "hint.skipped": "Nothing for this patch to change on this host; declared skippable.",',
-    },
     // #35 与 #14 是同效补丁：#14 把整个 approveEscalation 换成 return mode，
     // #35 要替换的那段 switch 随之消失，于是「锚点没了」被判成 skipped。
     // 行为其实已经到位，不认这条同效标记就会把「已生效」报成「没生效」——
     // 这是**假阴性**，比假阳性更危险：用户会以为保护没上。
     // markers 默认要求全部命中，所以必须同时给 markersAny。
-    {
-      file: "lib/patches/new-tools.mjs",
-      required: true,
-      find: '    markers: ["[dsh-purge] escalation never rejected"],',
-      replace:
-        "    // [dsh-purge-plus] #14 已把整个 approveEscalation 换成 return mode，本条锚点随之消失。\n" +
-        "    // 两者效果相同（升级永不拒绝），任一标记命中即算到位。\n" +
-        "    markersAny: true,\n" +
-        "    markers: [\n" +
-        '      "[dsh-purge] escalation never rejected",\n' +
-        '      "[dsh-purge] escalation bypass: every escalation request is granted.",\n' +
-        "    ],",
-    },
     // ══ N. 状态胶囊在行内垂直居中 ═══════════════════════════════════
     // 用户截图：三行高的行（中文名 + 英文标识 + 原因）里，胶囊贴在行的顶端。
     //
@@ -1555,204 +1451,16 @@ export function buildEdits(repo = resolveRepo()) {
     //   na          本机没有这个组件            → 不进分母，灰虚线，永远 0 工作量
     //   skipped     本机没有这条补丁要改的内容  → **留在分母里**，单独一格，不算失败
     //   missing_file 必需补丁的目标文件不在     → 同上（这一条是真缺口，更不能藏）
-    {
-      file: "client.js",
-      required: true,
-      find: 'function isNaRow(row) {\n  return row.st === "na" || row.st === "skipped" || row.st === "missing_file";\n}',
-      replace:
-        'function isNaRow(row) {\n  return row.st === "na";\n}\n' +
-        '/* [dsh-purge-plus] 「跳过」与「本端不适用」是两件事，必须分开计 */\n' +
-        'function isSkipRow(row) {\n  return row.st === "skipped" || row.st === "missing_file";\n}',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: "  const out = { applied: 0, pending: 0, off: 0, na: 0, total: 0, denom: 0 };",
-      replace: "  const out = { applied: 0, pending: 0, off: 0, skipped: 0, na: 0, total: 0, denom: 0 };",
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: "    else if (row.st === \"applied\" || row.st === \"already\") out.applied += 1;\n    else out.pending += 1;\n  }\n  out.denom = out.total - out.na;",
-      replace:
-        "    else if (row.st === \"applied\" || row.st === \"already\") out.applied += 1;\n" +
-        "    else if (isSkipRow(row)) out.skipped += 1;\n" +
-        "    else out.pending += 1;\n" +
-        "  }\n" +
-        "  out.denom = out.total - out.na;",
-    },
     // 分组小计也把 na 单列，否则「跳过 n」里会混进 6 条真正不适用
-    {
-      file: "client.js",
-      required: true,
-      // 两处：tallyPatches 的初值 + 概览卡片里 !located 的兜底对象，都要有 na
-      count: 2,
-      find: "    disabled: 0,\n    skipped: 0,\n    total: 0\n  };",
-      replace: "    disabled: 0,\n    skipped: 0,\n    na: 0,\n    total: 0\n  };",
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: "    else if (row.st === \"disabled\") out.disabled += 1;\n    else out.skipped += 1;",
-      replace: "    else if (row.st === \"disabled\") out.disabled += 1;\n    else if (row.st === \"na\") out.na += 1;\n    else out.skipped += 1;",
-    },
     // 结论句：有跳过就不能说「全部就位」
-    {
-      file: "client.js",
-      required: true,
-      find: '  const verdict = counts.pending ? t("health.verdict.pending", { n: counts.pending }) : t("health.verdict.ok");',
-      replace:
-        "  const verdict = counts.pending\n" +
-        '    ? t("health.verdict.pending", { n: counts.pending })\n' +
-        "    : counts.skipped\n" +
-        '      ? t("health.verdict.skipped", { n: counts.skipped })\n' +
-        '      : t("health.verdict.ok");',
-    },
     // 进度条补一段「跳过」
-    {
-      file: "client.js",
-      required: true,
-      find: '      h("i", {\n        className: "is-off",\n        style: { width: pct(counts.off) + "%" }\n      })',
-      replace:
-        '      h("i", {\n        className: "is-off",\n        style: { width: pct(counts.off) + "%" }\n      }),\n' +
-        '      h("i", {\n        className: "is-skip",\n        style: { width: pct(counts.skipped) + "%" }\n      })',
-    },
     // 第四格之前插一格「跳过」：85 + 0 + 0 + 2 + 6 = 93，能对上总数
-    {
-      file: "client.js",
-      required: true,
-      find: '      h(Tile, {\n        kind: "na",\n        label: t("health.na"),\n        value: counts.na,\n        title: t("health.na"),\n        text: t("health.hint.na")\n      })',
-      replace:
-        '      h(Tile, {\n        kind: "skip",\n        label: t("health.skipped"),\n        value: counts.skipped,\n        title: t("health.skipped"),\n        text: t("health.hint.skipped")\n      }),\n' +
-        '      h(Tile, {\n        kind: "na",\n        label: t("health.na"),\n        value: counts.na,\n        title: t("health.na"),\n        text: t("health.hint.na")\n      })',
-    },
     // 过滤条：「跳过」要有自己的按钮，否则那 2 条只能靠翻「全部」找
-    {
-      file: "client.js",
-      required: true,
-      find: 'var FILTERS = ["all", "pending", "off", "na"];',
-      replace: 'var FILTERS = ["all", "pending", "off", "skipped", "na"];',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: "  const filterCount = {\n    all: counts.total,\n    pending: counts.pending,\n    off: counts.off,\n    na: counts.na\n  };",
-      replace: "  const filterCount = {\n    all: counts.total,\n    pending: counts.pending,\n    off: counts.off,\n    skipped: counts.skipped,\n    na: counts.na\n  };",
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '    if (filter === "off") return row.st === "disabled";\n    if (filter === "na") return isNaRow(row);',
-      replace:
-        '    if (filter === "off") return row.st === "disabled";\n' +
-        '    if (filter === "skipped") return isSkipRow(row);\n' +
-        '    if (filter === "na") return isNaRow(row);',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '    if (filter === "pending")\n      return !isNaRow(row) && row.st !== "disabled" && row.st !== "applied" && row.st !== "already";',
-      replace:
-        '    if (filter === "pending")\n' +
-        '      return !isNaRow(row) && !isSkipRow(row) && row.st !== "disabled" && row.st !== "applied" && row.st !== "already";',
-    },
     // 组头小字：补上「跳过 n」
-    {
-      file: "client.js",
-      required: true,
-      find: '      if (tally.disabled)\n        notes.push(t("metric.disabledShort", { n: tally.disabled }));',
-      replace:
-        '      if (tally.disabled)\n        notes.push(t("metric.disabledShort", { n: tally.disabled }));\n' +
-        '      if (tally.skipped)\n        notes.push(t("metric.skipShort", { n: tally.skipped }));',
-    },
     // 概览卡片那行原本拿 tally.skipped 冒充「本端不适用」，改成各归各的
-    {
-      file: "client.js",
-      required: true,
-      find: '  if (tally.skipped)\n    metricNotes.push(t("metric.naShort", { n: tally.skipped }));',
-      replace:
-        '  if (tally.na)\n    metricNotes.push(t("metric.naShort", { n: tally.na }));\n' +
-        '  if (tally.skipped)\n    metricNotes.push(t("metric.skipShort", { n: tally.skipped }));',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: "  const counts = located ? patchGroupCounts(allRows) : { applied: 0, pending: 0, off: 0, na: 0, total: 0, denom: 0 };",
-      replace: "  const counts = located ? patchGroupCounts(allRows) : { applied: 0, pending: 0, off: 0, skipped: 0, na: 0, total: 0, denom: 0 };",
-    },
     // 顶部条：文案统一成「本端不适用」，并把「跳过」也报出来（85+2+6=93 能对上）
-    {
-      file: "client.js",
-      required: true,
-      find: '        info?.patches_na > 0 ? ` \\xB7 ${info.patches_na} \\u6761\\u672C\\u673A\\u4E0D\\u9002\\u7528` : ""',
-      replace:
-        '        (info?.patches_na > 0 ? ` \\xB7 ${info.patches_na} \\u6761\\u672C\\u7AEF\\u4E0D\\u9002\\u7528` : "") +\n' +
-        '          (info?.patches_skipped > 0 ? ` \\xB7 ${info.patches_skipped} \\u6761\\u8DF3\\u8FC7` : "")',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: "\\u9700\\u8981\\u91CD\\u65B0\\u5B9A\\u4F4D\\u951A\\u70B9\\u3002`",
-      replace: "\\u9700\\u8981\\u91CD\\u65B0\\u5B9A\\u4F4D\\u951A\\u70B9\\u3002\\u8DF3\\u8FC7\\uFF1A\\u672C\\u673A\\u6CA1\\u6709\\u8FD9\\u6761\\u8865\\u4E01\\u8981\\u6539\\u7684\\u5185\\u5BB9\\uFF0C\\u7559\\u5728\\u5206\\u6BCD\\u91CC\\uFF0C\\u4E0D\\u8BA1\\u5931\\u8D25\\u3002`",
-    },
     // 中文词条
-    {
-      file: "client.js",
-      required: true,
-      find: '  "health.verdict.ok": "\\u5BBF\\u4E3B\\u8865\\u4E01\\u5168\\u90E8\\u5C31\\u4F4D",',
-      replace:
-        '  "health.verdict.ok": "\\u5BBF\\u4E3B\\u8865\\u4E01\\u5168\\u90E8\\u5C31\\u4F4D",\n' +
-        '  "health.skipped": "\\u8DF3\\u8FC7",\n' +
-        '  "health.hint.skipped": "\\u672C\\u673A\\u6CA1\\u6709\\u8FD9\\u6761\\u8865\\u4E01\\u8981\\u6539\\u7684\\u5185\\u5BB9\\uFF08\\u5DF2\\u88AB\\u522B\\u7684\\u8865\\u4E01\\u8986\\u76D6 / \\u5BBF\\u4E3B\\u7248\\u672C\\u6CA1\\u6709\\u8FD9\\u6BB5\\u4EE3\\u7801 / \\u58F0\\u660E\\u53EF\\u8DF3\\u8FC7\\uFF09\\u3002\\u7559\\u5728\\u5206\\u6BCD\\u91CC\\uFF0C\\u4F46\\u4E0D\\u8BA1\\u5931\\u8D25\\u3002",\n' +
-        '  "health.verdict.skipped": "{n} \\u6761\\u8DF3\\u8FC7\\uFF08\\u672C\\u673A\\u6CA1\\u6709\\u8981\\u6539\\u7684\\u5185\\u5BB9\\uFF09",',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  "filter.na": "\\u672C\\u7AEF\\u4E0D\\u9002\\u7528",',
-      replace: '  "filter.na": "\\u672C\\u7AEF\\u4E0D\\u9002\\u7528",\n  "filter.skipped": "\\u8DF3\\u8FC7",',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  "health.hint.na": "\\u8FD9\\u53F0\\u5BBF\\u4E3B\\u6CA1\\u6709\\u5BF9\\u5E94\\u7EC4\\u4EF6\\u6216\\u6587\\u4EF6\\uFF0C\\u8FDB\\u4E86\\u4E5F\\u4E0D\\u8FDB\\u5206\\u6BCD\\u3002\\u6C38\\u8FDC 0 \\u5DE5\\u4F5C\\u91CF\\u3002",',
-      replace: '  "health.hint.na": "\\u8FD9\\u53F0\\u5BBF\\u4E3B\\u6CA1\\u6709\\u5BF9\\u5E94\\u7EC4\\u4EF6\\uFF0C\\u8FDB\\u4E86\\u4E5F\\u4E0D\\u8FDB\\u5206\\u6BCD\\u3002\\u6C38\\u8FDC 0 \\u5DE5\\u4F5C\\u91CF\\u3002",',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  "steps.foot": "\\u300C\\u672C\\u7AEF\\u4E0D\\u9002\\u7528\\u300D\\u4E0D\\u8FDB\\u5206\\u6BCD\\uFF0C\\u4E5F\\u4E0D\\u8BA1\\u5165\\u4EFB\\u4F55\\u5931\\u8D25\\u8BA1\\u6570\\u3002",',
-      replace: '  "steps.foot": "\\u300C\\u672C\\u7AEF\\u4E0D\\u9002\\u7528\\u300D\\u4E0D\\u8FDB\\u5206\\u6BCD\\uFF1B\\u300C\\u8DF3\\u8FC7\\u300D\\u7559\\u5728\\u5206\\u6BCD\\u91CC\\uFF0C\\u4F46\\u4E24\\u8005\\u90FD\\u4E0D\\u8BA1\\u5165\\u4EFB\\u4F55\\u5931\\u8D25\\u8BA1\\u6570\\u3002",',
-    },
     // 英文词条
-    {
-      file: "client.js",
-      required: true,
-      find: '  "health.verdict.ok": "All host patches in place",',
-      replace:
-        '  "health.verdict.ok": "All host patches in place",\n' +
-        '  "health.skipped": "Skipped",\n' +
-        '  "health.hint.skipped": "Nothing for this patch to change here (already covered by another patch, absent from this host version, or declared skippable). Stays in the denominator; not counted as failure.",\n' +
-        '  "health.verdict.skipped": "{n} skipped (nothing to change on this host)",',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  "filter.na": "Not for this host",',
-      replace: '  "filter.na": "Not for this host",\n  "filter.skipped": "Skipped",',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  "health.hint.na": "This host has no such component or file. Excluded from the denominator; zero work.",',
-      replace: '  "health.hint.na": "This host has no such component. Excluded from the denominator; zero work.",',
-    },
-    {
-      file: "client.js",
-      required: true,
-      find: '  "steps.foot": \'"Not for this host" is excluded from the denominator and from every failure count.\',',
-      replace: '  "steps.foot": \'"Not for this host" is excluded from the denominator; "Skipped" stays in it. Neither counts as a failure.\',',
-    },
     // 五格：4 列固定宽会把第五格挤到下一行，改成自适应
     {
       file: "client.js",
@@ -2143,22 +1851,6 @@ export function buildEdits(repo = resolveRepo()) {
     //   disabled 不算（用户主动关的），na 不算（本机没有这个组件）。
     // open 为 null 表示「还没手动点过」，跟随这个默认；点过之后按用户的选择走，
     // 并且第一次点击时把当时的默认状态整体复制下来，避免「点一个组、别的组全收」。
-    {
-      file: "client.js",
-      required: true,
-      find:
-        '/* [dsh-purge-plus] 「跳过」与「本端不适用」是两件事，必须分开计 */\n' +
-        'function isSkipRow(row) {\n  return row.st === "skipped" || row.st === "missing_file";\n}',
-      replace:
-        '/* [dsh-purge-plus] 「跳过」与「本端不适用」是两件事，必须分开计 */\n' +
-        'function isSkipRow(row) {\n  return row.st === "skipped" || row.st === "missing_file";\n}\n' +
-        '/* [dsh-purge-plus] 这一行「需要人看一眼」吗？决定所属分组默认展开与否。\n' +
-        '   disabled 不算（用户主动关的），na 不算（本机没有这个组件）。 */\n' +
-        'function needsAttentionRow(row) {\n' +
-        '  return row.st === "pending" || row.st === "unmatched" || row.st === "drifted" ||\n' +
-        '    row.st === "partial" || isSkipRow(row);\n' +
-        '}',
-    },
     {
       file: "client.js",
       required: true,
@@ -2579,43 +2271,6 @@ export function buildEdits(repo = resolveRepo()) {
     // 于是一个补丁在两个目标文件里只命中一个（partial）时，面板照样显示已生效。
     // 上游 master（e519253）已改成逐状态判定；本仓库留在 1.7.20 基线，
     // 用这两条编辑把同一语义补回来（不整棵替换 vendor）。
-    {
-      file: "lib/core/verify.mjs",
-      required: true,
-      find:
-        "export function rollupDisplayStatus(statuses) {\n" +
-        "  const list = (statuses || []).filter(Boolean);\n" +
-        "  if (list.length === 0) return \"skipped\";\n" +
-        "  if (list.some((s) => s === \"pending\")) return \"pending\";\n" +
-        "  if (list.some((s) => s === \"unmatched\")) return \"unmatched\";\n" +
-        "  if (list.every((s) => DISPLAY_SKIP.has(s))) return \"skipped\";\n" +
-        "  if (list.some((s) => DISPLAY_DONE.has(s))) return \"applied\";\n" +
-        "  return \"skipped\";\n" +
-        "}",
-      replace:
-        "export function rollupDisplayStatus(statuses) {\n" +
-        "  const list = (statuses || []).filter(Boolean);\n" +
-        "  if (list.length === 0) return \"skipped\";\n" +
-        "  if (list.some((s) => s === \"pending\")) return \"pending\";\n" +
-        "  if (list.some((s) => s === \"unmatched\")) return \"unmatched\";\n" +
-        "  if (list.every((s) => DISPLAY_SKIP.has(s))) return \"skipped\";\n" +
-        "  /* [dsh-purge-plus] 组内只要还有一条没打上（partial / pattern_not_found /\n" +
-        "     drifted …），整组就不能报 applied —— 否则「部分生效」在面板上等于「已生效」。 */\n" +
-        "  const live = list.filter((s) => !DISPLAY_SKIP.has(s));\n" +
-        "  if (live.some((s) => !DISPLAY_DONE.has(s))) return \"partial\";\n" +
-        "  if (live.some((s) => DISPLAY_DONE.has(s))) return \"applied\";\n" +
-        "  return \"skipped\";\n" +
-        "}",
-    },
-    {
-      file: "lib/core/verify.mjs",
-      required: true,
-      find: "    else if (st === \"unmatched\") out.unmatched += 1;\n",
-      replace:
-        "    // [dsh-purge-plus] partial 是「有目标文件没打上」，必须算未完成，\n" +
-        "    // 不能落进 else 分支被当成 skipped 并且计入 ready。\n" +
-        "    else if (st === \"unmatched\" || st === \"partial\") out.unmatched += 1;\n",
-    },
     {
       file: "lib/redteam/tools.js",
       required: true,

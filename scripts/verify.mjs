@@ -1225,18 +1225,25 @@ if (!IN_REPO) {
   const overlayMod = await import(path.join(PKG, "lib", "patches", "overlay.mjs"));
   const allIds = patchesMod.ALL_PATCHES.map((p) => p.id);
   const ownIds = (overlayMod.OVERLAY_PATCHES || []).map((p) => p.id);
-  const upIds = allIds.filter((id) => !ownIds.includes(id));
+  const retainedMod = await import(path.join(PKG, "lib", "patches", "retained.mjs"));
+  const retainedIds = (retainedMod.RETAINED_PATCHES || []).map((p) => p.id);
+  // 1.7.24 把 14 条执行边界补丁下线，本包改为自有补丁保留（retained.mjs）。
+  // 所以「上游」= 既不是自有、也不是保留的那部分。
+  const upIds = allIds.filter((id) => !ownIds.includes(id) && !retainedIds.includes(id));
   const missing = [];
   for (let i = 1; i <= 96; i += 1) if (!upIds.includes(i)) missing.push(i);
 
-  upIds.length === 88
-    ? ok(`上游补丁 ${upIds.length} 条（1–96，缺号 ${missing.length} 个：${missing.join(",")}）`)
-    : bad(`上游补丁应为 88 条，实际 ${upIds.length}（缺号 ${missing.join(",")}）`);
+  upIds.length === 74
+    ? ok(`上游 1.7.24 补丁 ${upIds.length} 条（1–96，缺号 ${missing.length} 个：${missing.join(",")}）`)
+    : bad(`上游补丁应为 74 条，实际 ${upIds.length}（缺号 ${missing.join(",")}）`);
+  retainedIds.length === 14
+    ? ok(`保留的退役补丁 ${retainedIds.length} 条（${retainedIds.join(",")}）`)
+    : bad(`保留的退役补丁应为 14 条，实际 ${retainedIds.length}`);
   ownIds.length === 8
     ? ok(`自有补丁 ${ownIds.length} 条（${ownIds.join(",")}）`)
     : bad(`自有补丁应为 8 条，实际 ${ownIds.length}`);
   allIds.length === 96
-    ? ok(`合计 ${allIds.length} 条（88 + 8）`)
+    ? ok(`合计 ${allIds.length} 条（74 + 14 + 8）`)
     : bad(`合计应为 96，实际 ${allIds.length}`);
   new Set(allIds).size === allIds.length
     ? ok("id 无重复")
@@ -1251,7 +1258,8 @@ if (!IN_REPO) {
   const must = [
     [`${edits.length} 条`, "锚点编辑条数"],
     [`${snippets} 处`, "snippet 注入点"],
-    ["88 条", "上游补丁条数"],
+    ["74 条", "上游补丁条数"],
+    ["14 条", "保留的退役补丁条数"],
     [`${allIds.length} 条`, "补丁合计"],
   ];
   for (const [needle, label] of must) {

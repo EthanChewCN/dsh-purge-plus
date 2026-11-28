@@ -1,4 +1,5 @@
 import { injectionPolicy, excludedPresetIds, withoutPurgeInjection, rememberPromptRewrite, requestInjectionContext } from "./preset-injection.js";
+import { allowOwnerRequest } from "./owner-admission.js";
 import { registerCommand } from "./command-registration.js";
 import { createUpdateController, preferences, savePreferences, publicPreferences, updateEnv } from "./update-policy.js";
 import { withUpdateEnvironment } from "./update-http.js";
@@ -38,6 +39,7 @@ import * as continueRetry from "./continue-retry.js";
 import * as uninstaller from "./uninstall.js";
 import * as selfcheck from "./selfcheck.js";
 import { BOOST_TEXT, readBoost, writeBoost } from "./boost.js";
+import { describeInjectConfig, writeInjectConfig } from "./inject-config.js";
 import { readTuning, writeTuning } from "./tuning.js";
 import { PROBE_SECTION, createProbe, probeText, readProbe } from "./probe.js";
 import { logAudit, readAudit } from "./audit.js";
@@ -170,14 +172,17 @@ function renderStatus(state) {
     const label = patch ? patch.name : `patch-${row.id}`;
     const layer = patch ? `${patch.layer}/${patch.layer_en}` : row.layer || "";
     out.push(`  ${mark} [#${String(row.id).padEnd(2)}] ${label.padEnd(30)} ${layer} — ${s}`);
+    if (row.id === 71) {
+      for (const file of state.patch_files?.[71] || []) out.push(`    ${file.status}  ${file.path}`);
+    }
   }
   out.push("");
   out.push(`shim: dsh.cmd=${state.shim_cmd}  dsh.ps1=${state.shim_ps1}  dsh=${state.shim_bin}`);
   return out.join("\n");
 }
 
-function injectAllowedNow(config, context) {
-  return injectionPolicy(config, context).allowed;
+function injectAllowedNow(config, context, layer = "main") {
+  return injectionPolicy(config, context, layer).allowed;
 }
 
 /** 提示词框自改 > prompt-inject.md > 加密默认（见 rules.resolveInjectText）。 */
@@ -436,7 +441,7 @@ export function registerPromptSections(ctx, config) {
       order: GLOBAL_PROMPT_ORDER + 1,
       interpolate: false,
       text: (context) => {
-        if (!injectAllowedNow(config, context)) return "";
+        if (!injectAllowedNow(config, context, "protocol")) return "";
         const redteam = isRedteamSession(context);
         return capabilityProtocolText({
           redteam,
@@ -453,7 +458,7 @@ export function registerPromptSections(ctx, config) {
       name: "dsh-purge-boost",
       order: boostPromptOrder(),
       interpolate: false,
-      text: (context) => (injectAllowedNow(config, context) ? BOOST_TEXT : ""),
+      text: (context) => (injectAllowedNow(config, context, "boost") ? BOOST_TEXT : ""),
     });
   }
 
@@ -1545,6 +1550,7 @@ export function apply(ctx, config) {
       // 与 installWebServer 里的 registerPluginRoute 保持同一口径：监听器的绑定地址
       // 也属于本机。少了这个参数时，非回环绑定的部署只有本条路由返回 403。
       if(!allowPluginRequest(request,response,trustedHostnames(host.webServer.host,hostTrustedHosts(ctx))))return;
+      if(!allowOwnerRequest(host,request,response))return;
       try {
         let result;
         if(request.method==="GET") {
@@ -1821,32 +1827,6 @@ export function installCommands(ctx, cfg, diagnostics = { commands: [] }) {
       input: { hint: "list | import <路径> | create <id> [说明] | delete <id> | help" },
       handler: async (invocation) => handleSkillsCommand(invocation.rawInput ?? ""),
     }, "purge-skills");
-    register({
-      name: "rewind",
-      description: "回退：子代理直接回退一次；主代理 /rewind once 或 /rewind round",
-      input: { hint: "once | round" },
-      handler: async (invocation) => {
-        const sessionId = rewind.invocationSessionId(invocation);
-        const arg = String(invocation.rawInput || "").trim().split(/\s+/)[0]?.toLowerCase() || "";
-        const info = await rewind.analyzeRewind(ctx, sessionId);
-        const commandName = diagnostics.commands.find(row => row.name === "rewind")?.registered || "rewind";
-        if (info.ok && info.kind === "main" && arg !== "once" && arg !== "round") {
-          return {
-            kind: "success",
-            text: `主代理请选择：/${commandName} once 回退一次，/${commandName} round 回退上一轮（含本轮子代理）。`,
-          };
-        }
-        const mode = arg === "round" ? "round" : "once";
-        const result = await rewind.applyRewind(ctx, sessionId, mode);
-        if (!result.ok) return { kind: "error", text: result.error };
-        return {
-          kind: "success",
-          text: mode === "round"
-            ? "已回退上一轮。还在这条对话里，上一句已放回输入框。再发送时，之前的回复不会带上。"
-            : "已回退一次。还在这条对话里，上一句已放回输入框。再发送时，之前的回复不会带上。",
-        };
-      },
-    }, "purge-rewind");
   });
 }
 
@@ -2022,6 +2002,7 @@ export function installWebServer(ctx, cfg, diagnostics = { commands: [] }) {
         ...spec,
         handler: async (request, response) => {
           if (!allowPluginRequest(request, response, trustedHostnames(host.webServer.host, hostTrustedHosts(ctx)))) return;
+          if (!allowOwnerRequest(host, request, response)) return;
           return spec.handler(request, response);
         },
       }, label));
@@ -2051,9 +2032,9 @@ export function installWebServer(ctx, cfg, diagnostics = { commands: [] }) {
               asar_handoff: state.asar_handoff || null,
               missing_ai_base: state.ai_base ? "" : core.missingAiBaseMessage(),
               patches_applied: state.ai_base ? state.patches_applied : 0,
-              patches_pending: state.display_pending ?? state.patches_pending,
-              patches_skipped: state.display_skipped ?? state.patches_skipped ?? 0,
-              patches_ready: state.display_ready ?? state.patches_ready ?? 0,
+              patches_pending: state.patches_pending,
+              patches_skipped: state.patches_skipped ?? 0,
+              patches_ready: state.patches_ready ?? 0,
               patches_na: state.patches_na || 0,
               patches_total: state.ai_base ? (state.patches_total ?? 0) : 0,
               patches_total_all: core.ALL_PATCHES.length,
@@ -2066,6 +2047,9 @@ export function installWebServer(ctx, cfg, diagnostics = { commands: [] }) {
                 ids: p.ids,
                 layer: p.layer || "",
                 status: p.status,
+                optional: p.optional,
+                settleWhenAbsent: p.settleWhenAbsent,
+                ...(p.members ? { members:p.members } : {}),
               })),
               // 逐补丁真值：状态页的计数一律走这份，不能用上面的分组表
               // （一个分组会把成员聚合成单一状态，条数就对不上）。
@@ -2073,7 +2057,9 @@ export function installWebServer(ctx, cfg, diagnostics = { commands: [] }) {
                 id: p.id,
                 layer: p.layer || "",
                 name: p.name,
-                status: state.patch_status?.[p.id] || "na",
+                status: state.patch_status?.[p.id] || "unknown",
+                optional: !!p.optional,
+                settleWhenAbsent: !!p.settleWhenAbsent,
               })),
               patch_names,
               shim_cmd: state.shim_cmd,
@@ -2204,6 +2190,36 @@ export function installWebServer(ctx, cfg, diagnostics = { commands: [] }) {
           response.end();
         },
       }, "dsh-purge: boost");
+      registerPluginRoute({
+        kind: "exact",
+        path: "/dsh-purge/inject-config",
+        handler: async (request, response) => {
+          if (request.method === "GET") {
+            try {
+              sendJson(response, 200, { ok: true, config: describeInjectConfig(cfg) });
+            } catch (error) {
+              sendJson(response, 500, { ok: false, error: String(error) });
+            }
+            return;
+          }
+          if (request.method === "POST") {
+            try {
+              const body = await readJsonBody(request);
+              const result = await writeInjectConfig(ctx, body && typeof body === "object" ? body : {});
+              if (!result.ok) {
+                sendJson(response, 503, { ok: false, error: result.error });
+                return;
+              }
+              sendJson(response, 200, { ok: true, config: result.config, reload_required: false });
+            } catch (error) {
+              sendJson(response, 500, { ok: false, error: String(error && error.message || error) });
+            }
+            return;
+          }
+          response.writeHead(405, { allow: "GET, POST" });
+          response.end();
+        },
+      }, "dsh-purge: inject-config");
       registerPluginRoute({
         kind: "exact",
         path: "/dsh-purge/probe",
@@ -2983,6 +2999,7 @@ function registerRoute(webServer, ctx, spec) {
       ...spec,
       handler: async (request, response) => {
         if (!allowPluginRequest(request, response, trustedHostnames(webServer?.host, hostTrustedHosts(ctx)))) return;
+        if (!allowOwnerRequest(ctx, request, response)) return;
         return handler(request, response);
       },
     });
