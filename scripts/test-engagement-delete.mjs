@@ -123,7 +123,7 @@ try {
 
 /* ── 8. 构建产物里真的接上了（UI 不是 mock）─────────────────── */
 const panel = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
-const full = fs.readFileSync(path.join(PKG, "lib", "redteam", "client.js"), "utf8");
+const full = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
 for (const [name, src] of [["面板内嵌", panel], ["独立窗口", full]]) {
   ok(src.includes("function CleanupPanel(props)"), name + "：有 CleanupPanel")
   ok(/CleanupPanel, \{ engagement: eng/.test(src), name + "：CleanupPanel 被挂进凭据与文件页")

@@ -56,6 +56,10 @@ const PurgeErrorBoundary = __PurgeComponent
       }
       componentDidCatch(error) {
         __purgeRecordError("render", error);
+        /* 同时打到控制台：面板自己打不开时，DevTools 里这一行是唯一能拿到的根因。 */
+        try {
+          if (typeof console !== "undefined") console.error("[dsh-purge-plus] 面板渲染失败：", error);
+        } catch {}
       }
       render() {
         const err = this.state.error;

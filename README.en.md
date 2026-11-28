@@ -54,15 +54,15 @@ It does not change the model, the cloud account, or upload prompts and configura
 ```
 base    dsh-purge Community   MIT         host patches · patch engine · ops layer
 port    dsh-purge safe        Apache-2.0  a branch with a wider capability surface
-result  dsh-purge-plus        variant     96 patches · 54 read-only checks
+result  dsh-purge-plus        variant     96 patches · 56 read-only checks
 ```
 
 This repo is **not** a fork of community and **not** a fork of safe. It treats both upstreams as read-only inputs:
 
 - `vendor/community/` — the base, verbatim copy, read-only at build time;
 - `vendor/safe/` — the porting source, verbatim copy, used only for comparison;
-- `overlay/` — **every** change this repo makes: new files plus **299 anchor edits** (`required` 295 / `required:false` 3)
-  and **97 snippet injection points** plus 4 brand-string fixes, guarded by `verify [26]` (doc numbers must match recomputed code counts).
+- `overlay/` — **every** change this repo makes: new files plus **316 anchor edits** (`required` 313 / `required:false` 3)
+  and **54 snippet injection points** plus 4 brand-string fixes, guarded by `verify [26]` (doc numbers must match recomputed code counts).
 
 ---
 
@@ -166,7 +166,7 @@ The repository root is **not** an installable package (there is no `package.json
 
 ```bash
 node scripts/build.mjs      # → dist/dsh-purge-plus-<ver>.tgz
-node scripts/verify.mjs     # 54 read-only checks, host untouched
+node scripts/verify.mjs     # 56 read-only checks, host untouched
 ```
 
 Then as above: panel → Plugins → Install from file → pick `dist/dsh-purge-plus-<ver>.tgz` → restart DSH.
@@ -249,9 +249,9 @@ git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
 | Stage | Action | On failure |
 | :--- | :--- | :--- |
 | Swap vendor | replace `vendor/community` wholesale | — |
-| Replay overlay | apply 299 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
+| Replay overlay | apply 316 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
-| Verify | 54 read-only checks | any red → non-zero exit |
+| Verify | 56 read-only checks | any red → non-zero exit |
 
 "Exactly N hits" is a hard constraint: 0 hits means the anchor rotted after a host upgrade; ≥2 means it would patch the wrong place. Both fail the build.
 
@@ -265,7 +265,7 @@ The 3 edits marked `required: false` only warn instead of aborting — they are 
 node scripts/verify.mjs
 ```
 
-All 54 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (the ones a reader is most likely to hit):
+All 56 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (the ones a reader is most likely to hit):
 
 | # | Check | A failure means |
 | :--- | :--- | :--- |
@@ -301,10 +301,10 @@ overlay/files/             new files (copied over the product)
   ├─ skills/redteam/           skill library (40 .md files)
   └─ NOTICE-PLUS.md            attribution and per-file change record
 overlay/snippets/          long code blocks injected into the product (tabs, charts, report rendering …)
-overlay/edits.mjs          299 anchor edits
+overlay/edits.mjs          316 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
-scripts/verify.mjs         54 read-only checks
+scripts/verify.mjs         56 read-only checks
 scripts/check-rebuild.mjs  clone-rebuild consistency (before release)
 scripts/test-*.mjs         43 behavioural regressions (run by verify [33])
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → local CVE base DB

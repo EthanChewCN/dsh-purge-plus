@@ -230,9 +230,9 @@ console.log("[7] 有容器时按钮就位，点击能切");
   eq(pill.textContent, "跟随", "文案是「跟随」");
 }
 
-console.log("[8] 接线：两份产物都带、且不在 html 上写属性");
+console.log("[8] 接线：产物带、且不在 html 上写属性");
 {
-  for (const rel of ["lib/redteam/client.js", "client.js"]) {
+  for (const rel of ["client.js"]) {
     const src = fs.readFileSync(path.join(PKG, rel), "utf8");
     eq(src.includes("dshpp-theme-pill"), true, `${rel} 带主题按钮`);
     eq(src.includes("dsh-purge-plus:ui-theme"), true, `${rel} 用带前缀的存储键`);

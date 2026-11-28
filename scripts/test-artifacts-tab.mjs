@@ -122,7 +122,7 @@ const byText = (tree, label) => buttons(tree).find((b) => textOf(b) === label);
 
 // ── 装配被测组件 ─────────────────────────────────────────────────
 function loadVariant(kind) {
-  const file = kind === "panel" ? path.join(PKG, "client.js") : path.join(PKG, "lib", "redteam", "client.js");
+  const file = path.join(PKG, "client.js");
   const src = fs.readFileSync(file, "utf8");
   const parts = ["SecretText", "CredentialList", "AccessList", "ArtifactsTab"].map((n) => sliceFn(src, n));
   if (parts.some((p) => !p)) return { error: `${kind}: 切不出组件（${parts.map((p, i) => (p ? "" : i)).filter(String).join(",")}）` };
@@ -164,7 +164,7 @@ function harness(kind, fixture, engagement) {
 }
 
 // ── 断言 ─────────────────────────────────────────────────────────
-const KINDS = ["panel", "redteam"];
+const KINDS = ["panel"];
 const texts = {};
 
 for (const kind of KINDS) {
@@ -227,11 +227,8 @@ for (const kind of KINDS) {
   eq(noEng.calls.length, 0, `${kind}: 无靶标时不发请求`);
 }
 
-/* 两份产物行为一致：可见文本逐字相同（adaptSnippet 的方言改写不能改变语义） */
-if (texts.panel && texts.redteam) {
-  eq(texts.panel, texts.redteam, "面板 / 全屏两份产物的可见文本逐字一致");
-  ok(texts.panel.includes("凭据与文件"), "标题文案一致");
-}
+/* 只有一个产物；标题文案必须在里面 */
+if (texts.panel) ok(texts.panel.includes("凭据与文件"), "标题文案在产物里");
 
 /* 组件被真的切出来了（防止「切不到就当通过」） */
 for (const kind of KINDS) {

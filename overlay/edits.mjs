@@ -1642,6 +1642,194 @@ export function buildEdits(repo = resolveRepo()) {
         "        const parsed = raw.trim() ? JSON.parse(raw) : {}\n" +
         "        const request = parsed && typeof parsed === 'object' ? parsed : {}",
     },
+    // ── 幽灵引用：`fs` 未 import，防软链删穿的守卫是死的 ──────────
+    // 上游只 import 了 `promises as fsp`，`fs.realpathSync` 抛 ReferenceError
+    // 被同一个 try 的 `catch { return abs }` 吃掉 → toReal() 退化成 path.resolve，
+    // 注释明写「只 resolve 不解 symlink 会把 skills 删穿」，而防它的那行代码从未执行。
+    {
+      file: "lib/skills.js",
+      required: true,
+      find: 'import { promises as fsp } from "node:fs";',
+      replace: 'import { promises as fsp, realpathSync } from "node:fs"; // [dsh-purge-plus] realpathSync 原先只被引用未导入',
+    },
+    {
+      file: "lib/skills.js",
+      required: true,
+      find: "    try { return fs.realpathSync.native ? fs.realpathSync.native(abs) : fs.realpathSync(abs); }",
+      replace: "    try { return realpathSync.native ? realpathSync.native(abs) : realpathSync(abs); }",
+    },
+    // ── hashbang 不在第 1 行：整个脚本 `node --check` 直接失败 ──────
+    // 社区血统那份把 import 放在了 shebang 前面；safe 那份顺序是对的。
+    {
+      file: "scripts/export-engagement-report.mjs",
+      required: true,
+      find: 'import { removeTreeNoFollowSync } from "../lib/remove-tree.js";\n#!/usr/bin/env node',
+      replace: '#!/usr/bin/env node\nimport { removeTreeNoFollowSync } from "../lib/remove-tree.js";',
+    },
+    // ── 面板权限组：写死空数组 + 文案否认，与 14 条真实补丁矛盾 ──────
+    // PERMISSION_PATCH_IDS 是空数组、desc 写「本构建已移除全部权限补丁」，
+    // 而 ALL_PATCHES 里 permissionOverride 实测 14 条且宿主文件上已生效 →
+    // 面板的 chip 恒显示「0 条」，替一条真实行为做否认（01-upstream S1）。
+    {
+      file: "client.js",
+      required: true,
+      find: "var PERMISSION_PATCH_IDS = [];",
+      replace:
+        "/* [dsh-purge-plus] 这 14 条由 tuning.permissionPatches 总闸控制，宿主上已生效。\n" +
+        "   以前这里写 [] 且文案说「已移除全部权限补丁」——面板在替真实行为做否认。\n" +
+        "   verify 断言这份清单 == ALL_PATCHES.filter(p => p.permissionOverride) 的 id 集。 */\n" +
+        "var PERMISSION_PATCH_IDS = [6,7,8,9,10,13,14,15,16,35,51,59,60,62];",
+    },
+    {
+      file: "client.js",
+      required: true,
+      find: '"\\u672C\\u6784\\u5EFA\\u5DF2\\u79FB\\u9664\\u5168\\u90E8\\u6743\\u9650/\\u6C99\\u7BB1/\\u5BA1\\u6279\\u8865\\u4E01\\u3002\\u6743\\u9650\\u8BF7\\u76F4\\u63A5\\u7528 DSH \\u539F\\u751F\\u8BBE\\u7F6E\\uFF08danger-full-access\\u3001approval policy\\uFF09\\u3002"',
+      replace: '"\\u6743\\u9650/\\u6C99\\u7BB1/\\u5BA1\\u6279\\u5171 14 \\u6761\\u8865\\u4E01\\uFF0C\\u7531\\u8FD9\\u4E2A\\u603B\\u95F8\\u63A7\\u5236\\uFF1B\\u5173\\u6389\\u5373\\u5168\\u90E8\\u56DE\\u6EDA\\u6210\\u5BBF\\u4E3B\\u539F\\u6837\\u3002\\u6743\\u9650\\u6863\\u4F4D\\u672C\\u8EAB\\u4ECD\\u7531 DSH \\u539F\\u751F\\u8BBE\\u7F6E\\u51B3\\u5B9A\\u3002"',
+    },
+    {
+      file: "client.js",
+      required: true,
+      find: '"This build ships no permission / sandbox / approval patches. Use the native DSH settings instead (danger-full-access, approval policy)."',
+      replace: '"14 permission / sandbox / approval patches sit behind this master switch. Turn it off and all of them roll back to the host original. The permission level itself still comes from the native DSH settings."',
+    },
+    // 分组改成优先信后端下发的 permission / context 标记，硬编码表只作退路
+    {
+      file: "client.js",
+      required: true,
+      find:
+        'function patchGroupOf(id) {\n' +
+        '  const n = Number(id);\n' +
+        '  if (PERMISSION_SET.has(n)) return "permission";\n' +
+        '  if (CONTEXT_SET.has(n)) return "context";\n' +
+        '  return "normal";\n' +
+        '}',
+      replace:
+        'function patchGroupOf(id) {\n' +
+        '  const n = Number(id);\n' +
+        '  if (PERMISSION_SET.has(n)) return "permission";\n' +
+        '  if (CONTEXT_SET.has(n)) return "context";\n' +
+        '  return "normal";\n' +
+        '}\n' +
+        '/* [dsh-purge-plus] 后端 patch_rows 现在带 permission / context 标记，\n' +
+        '   分组以后端为准，硬编码集合只作旧响应的退路 —— 两处口径不会再分叉。 */\n' +
+        'function rowGroup(r) {\n' +
+        '  if (r && r.permission === true) return "permission";\n' +
+        '  if (r && r.context === true) return "context";\n' +
+        '  return patchGroupOf(r && r.id);\n' +
+        '}',
+    },
+    {
+      file: "client.js",
+      required: true,
+      find:
+        '  const permApplied = rows.filter(\n' +
+        '    (r) => patchGroupOf(r.id) === "permission" && r.st === "applied"\n' +
+        '  ).length;\n' +
+        '  const permPending = rows.filter(\n' +
+        '    (r) => patchGroupOf(r.id) === "permission" && r.st === "pending"\n' +
+        '  ).length;\n' +
+        '  const ctxApplied = rows.filter(\n' +
+        '    (r) => patchGroupOf(r.id) === "context" && r.st === "applied"\n' +
+        '  ).length;',
+      replace:
+        '  /* [dsh-purge-plus] 分母取自真实行数，不再用写死的 PERMISSION_PATCH_IDS.length\n' +
+        '     （那是 0，chip 恒显示「0 条」）。 */\n' +
+        '  const permRows = rows.filter((r) => rowGroup(r) === "permission");\n' +
+        '  const permTotal = permRows.length || PERMISSION_PATCH_IDS.length;\n' +
+        '  const permApplied = permRows.filter((r) => r.st === "applied").length;\n' +
+        '  const permPending = permRows.filter((r) => r.st === "pending").length;\n' +
+        '  const ctxApplied = rows.filter((r) => rowGroup(r) === "context" && r.st === "applied").length;',
+    },
+    {
+      file: "client.js",
+      required: true,
+      find:
+        '        chip: kind !== "detail" ? t("evidence." + kind) : permOn ? t("sw.chip.on", {\n' +
+        '          n: PERMISSION_PATCH_IDS.length,\n' +
+        '          written: permApplied,\n' +
+        '          pending: permPending\n' +
+        '        }) : t("sw.chip.off", { n: PERMISSION_PATCH_IDS.length }),',
+      replace:
+        '        chip: kind !== "detail" ? t("evidence." + kind) : permOn ? t("sw.chip.on", {\n' +
+        '          n: permTotal,\n' +
+        '          written: permApplied,\n' +
+        '          pending: permPending\n' +
+        '        }) : t("sw.chip.off", { n: permTotal }),',
+    },
+    {
+      file: "client.js",
+      required: true,
+      find:
+        '        optional: p.optional === true,\n' +
+        '        settleWhenAbsent: p.settleWhenAbsent === true\n' +
+        '      }))',
+      replace:
+        '        optional: p.optional === true,\n' +
+        '        settleWhenAbsent: p.settleWhenAbsent === true,\n' +
+        '        permission: p.permission === true, // [dsh-purge-plus] 分组用后端真值\n' +
+        '        context: p.context === true\n' +
+        '      }))',
+    },
+    {
+      file: "lib/index.js",
+      required: true,
+      find:
+        '                optional: !!p.optional,\n' +
+        '                settleWhenAbsent: !!p.settleWhenAbsent,\n' +
+        '              })),\n' +
+        '              patch_names,',
+      replace:
+        '                optional: !!p.optional,\n' +
+        '                settleWhenAbsent: !!p.settleWhenAbsent,\n' +
+        '                permission: !!p.permissionOverride, // [dsh-purge-plus] 面板按这个分组\n' +
+        '                context: !!p.disabledByDefault,\n' +
+        '              })),\n' +
+        '              patch_names,',
+    },
+    // ── 文档/注释与行为相反：permissionPatches 其实是 14 条的总闸 ──
+    // lib/core.js:3930 实测 `if (patch.permissionOverride) return t.permissionPatches !== false`，
+    // 即 true→启用 14 条 / false→0 条。原注释说「本字段不再影响任何补丁」（01-upstream S2）。
+    {
+      file: "lib/tuning.js",
+      required: true,
+      find: "  permissionPatches: true, // 兼容字段：权限补丁已从本构建移除，本字段不再影响任何补丁",
+      replace:
+        "  permissionPatches: true, // 14 条权限/沙箱/审批补丁（retained.mjs）的总闸：false 即全部回滚成宿主原样",
+    },
+    {
+      file: "docs/releases/1.7.24.md",
+      required: true,
+      find: "`tuning.permissionPatches` 保留但**不再影响任何补丁**——那 14 条已经不存在。读到该字段不会报错，也不会产生效果。",
+      replace:
+        "`tuning.permissionPatches` 是那 14 条权限/沙箱/审批补丁的**总闸**：本包把它们接成 `lib/patches/retained.mjs` 保留下来，`true` 启用全部、`false` 全部回滚成宿主原样。",
+    },
+    // 自检层数：文档写 25，实测静态层 17 + 动态层上限 22、实跑 20
+    {
+      file: "docs/troubleshooting.md",
+      required: true,
+      find: "| `selfcheck [--json]` | 是 | 25 层 `state`；`broken` 才退出 1 |",
+      replace: "| `selfcheck [--json]` | 是 | 静态 17 层 + 动态层（合计上限 22，本机实跑 20）`state`；`broken` 才退出 1 |",
+    },
+    // ── 自检层缺了自有 8 条：宿主升级后 #207/#208 漂移会静默复发 ──────
+    // 04-behavior 实测：把克隆宿主里的 #206/#207 拆成 pending 后，
+    // 17 个宿主层仍全绿、broken=0、零提示。api-session-controller 的锚点一漂，
+    // 「选红队模式发一句话又变回标准」就会复发而面板说「一切正常」。
+    {
+      file: "lib/selfcheck.js",
+      required: true,
+      find:
+        '  { ids: [82, 83, 84], optionalIds: [82, 83, 84], title: "桌面宿主启动兜底", kind: "host",\n' +
+        '    why: "缺 DSH_PROFILE 也能定位 profile；host 被信号杀或正常退出不弹崩溃框" },\n' +
+        ']);',
+      replace:
+        '  { ids: [82, 83, 84], optionalIds: [82, 83, 84], title: "桌面宿主启动兜底", kind: "host",\n' +
+        '    why: "缺 DSH_PROFILE 也能定位 profile；host 被信号杀或正常退出不弹崩溃框" },\n' +
+        '  /* [dsh-purge-plus] 自有 8 条（≥201）原先不在任何自检层里：\n' +
+        '     宿主升级让 api-session-controller 的锚点漂移时，面板仍然全绿。 */\n' +
+        '  { ids: [201, 202, 203, 205, 206, 207, 208, 209], title: "自有补丁（≥201）", kind: "host",\n' +
+        '    why: "埋点/遥测/剪贴板/会话复用/挂起提示：宿主升级让锚点漂移时必须看得出来" },\n' +
+        ']);',
+    },
     // ── M-3 符号链接形态的技能被静默跳过 ───────────────────────────
     // Dirent 的 isDirectory()/isFile() 对软链都返回 false，
     // `ln -s ~/dev/my-skill ~/.dsh/skills/my-skill` 这种常见装法直接掉出去。
@@ -1881,7 +2069,7 @@ export function buildEdits(repo = resolveRepo()) {
         '     组内只要有一条没落地就展开，全部已应用（或本机不需要）就收起。 */\n' +
         '  const autoOpen = {};\n' +
         '  for (const [key, rows] of grouped) {\n' +
-        '    if (rows.some((row) => needsAttentionRow(row))) autoOpen[key] = true;\n' +
+        '    if (rows.some((row) => ["pending", "unknown", "broken"].includes(patchStateCategory(row, row.st)))) autoOpen[key] = true;\n' +
         '  }\n' +
         '  const effectiveOpen = open || autoOpen;',
     },
@@ -4785,6 +4973,21 @@ export function buildEdits(repo = resolveRepo()) {
       find: '  return h("div", { className: "dshpp-detail-settings" }, h(PurgePage));\n',
       replace:
         '  return h("div", { className: "dshpp-detail-settings" }, h(PurgeErrorBoundary, null, h(PurgePage)));\n',
+    },
+    // 面板空白兜底：apply 里任何一步抛错，后面的 slots.inject 全都不执行，
+    // 界面表现是「侧栏有 Purge、点进去空白」。改成先注册插槽、副作用逐步隔离。
+    {
+      file: "client.js",
+      required: true,
+      regex: true,
+      find: "function apply\\(ctx\\) \\{[\\s\\S]*?\\n\\}\\n",
+      replace: "function apply(ctx) {\n  /* [dsh-purge-plus] \u63d2\u69fd\u5148\u6ce8\u518c\uff0c\u526f\u4f5c\u7528\u540e\u6267\u884c\uff0c\u6bcf\u4e00\u6b65\u72ec\u7acb\u9694\u79bb\u3002\n     \u539f\u56e0\uff1aapply \u91cc\u4efb\u4f55\u4e00\u6b65\u629b\u9519\uff0c\u540e\u9762\u7684 slots.inject \u5c31\u5168\u90fd\u4e0d\u4f1a\u6267\u884c\uff0c\n     \u754c\u9762\u4e0a\u8868\u73b0\u4e3a\u300c\u4fa7\u680f\u6709 Purge\u3001\u70b9\u8fdb\u53bb\u4e00\u7247\u7a7a\u767d\u300d\uff0c\u800c\u4e14\u6ca1\u6709\u4efb\u4f55\u9519\u8bef\u53ef\u770b\u3002\n     \u73b0\u5728\u5931\u8d25\u53ea\u8bb0\u8fdb window.__dshPurgeErrors + console.error\uff0c\u9875\u9762\u7167\u5e38\u6e32\u67d3\u3002 */\n  const guard = (label, fn) => {\n    try {\n      return fn();\n    } catch (err) {\n      __purgeRecordError(label, err);\n      try {\n        console.error(\"[dsh-purge-plus] \" + label + \" \u5931\u8d25:\", err);\n      } catch (e) {\n      }\n      return void 0;\n    }\n  };\n  const t = guard(\"locale bind\", () => ctx.locale.bind(NS)) || ((key) => key);\n  guard(\"locale register\", () => ctx.locale.register(NS, { zh, en }));\n  setTranslate(t);\n  guard(\"slot shell.overlay\", () => ctx.slots.inject(\"shell.overlay\", () => ctx.slots.register({\n    name: \"shell.overlay\",\n    id: \"dsh-purge-panel-overlays\",\n    order: 60\n  }, PanelOverlays)));\n  guard(\"slot sidebar.panellist\", () => ctx.slots.inject(\"sidebar.panellist\", () => ctx.slots.register({\n    name: \"sidebar.panellist\",\n    id: \"dsh-purge\",\n    order: 30,\n    label: \"Purge\",\n    inject: () => ({ t })\n  }, PurgeGlyphIcon)));\n  guard(\"slot main\", () => ctx.slots.inject(\"main\", () => ctx.slots.register({\n    name: \"main\",\n    key: \"dsh-purge\",\n    inject: () => ({ t })\n  }, PurgePageGuarded)));\n  guard(\"slot plugins.bundle.config\", () => ctx.slots.inject(\"plugins.bundle.config\", () => ctx.slots.register({\n    name: \"plugins.bundle.config\",\n    key: \"dsh-purge-plus\",\n    inject: () => ({ t })\n  }, DetailSettings)));\n  guard(\"slot plugins.row.config\", () => ctx.slots.inject(\"plugins.row.config\", () => ctx.slots.register({\n    name: \"plugins.row.config\",\n    key: name + \"#dsh-purge\",\n    inject: () => ({ t })\n  }, DetailSettings)));\n  guard(\"legacy visibility\", () => ctx.effect(() => installLegacyVisibility(), \"panel legacy visibility\"));\n  guard(\"session context\", () => ctx.inject([\"sessions\", \"uiWorkspace\"], (host3) => {\n    host3.effect(() => bindSessionContext(host3), \"panel session context\");\n  }));\n  guard(\"preset menu\", () => ctx.inject([\"remote\", \"remote.agentPresets\"], (host3) => host3.effect(() => bindPresetMenu(document, () => host3.remote.agentPresets.list()), \"preset menu aliases\")));\n  guard(\"grant sync\", () => ctx.effect(startGrantSync, \"panel grant sync\"));\n  guard(\"rewind draft sync\", () => ctx.inject([\"sessions\", \"uiWorkspace\", \"conversation\"], (host3) => installRewindDraftSync(host3)));\n}\n",
+    },
+    {
+      file: "client.js",
+      required: true,
+      find: "function DetailSettings({ view } = {}) {",
+      replace: "function PurgePageGuarded() {\n  return h(PurgeErrorBoundary, null, h(PurgePage));\n}\nfunction DetailSettings({ view } = {}) {",
     },
   ];
 }

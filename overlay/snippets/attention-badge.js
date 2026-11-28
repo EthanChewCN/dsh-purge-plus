@@ -15,6 +15,13 @@
    * 本文件用 2 空格缩进：面板产物的适配器会整体减 2 空格，正好落到顶层（列 0），
    * 与 PanelOverlays 同级。不要给它加更多缩进。
    */
+  /* 顶层没有演练台 IIFE 私有的 api 请求器：这里自带一个同语义的。
+     只差在失败处理——角标不能因为一次网络抖动把外壳一起炸掉。 */
+  const attnApi = (req) => fetch(apiUrl("/redteam/api"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req)
+  }).then((r) => r.json())
   const ATTN_LS_KEY = "dsh-purge-plus:attention-badge"
   const ATTN_GOTO_EVENT = "dsh-purge-plus:goto-tab"
   const ATTN_POLL_MS = 30000
@@ -110,7 +117,7 @@
         if (typeof document !== "undefined" && document.hidden) return
         /* 带 session：多会话并行时「我在等谁」按本会话绑定的靶标算，
            不带就会退到全局指针，把别人的等待算到自己头上。 */
-        api({ op: "attention", session: readSession(), limit: 5 }).then((r) => {
+        attnApi({ op: "attention", session: readSession(), limit: 5 }).then((r) => {
           if (!alive) return
           /* 读取失败保留上一次结果：宁可显示一份旧队列，也不假装「没人等」。 */
           if (!r || r.ok === false) return

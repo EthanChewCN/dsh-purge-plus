@@ -199,9 +199,9 @@
   },
   {
     "id": "M19-group-miss-evidence",
-    "file": "lib/redteam/client.js",
-    "find": "        { key: 'results', label: '成果与报告', tabs: ['findings', 'artifacts', 'evidence', 'chain', 'scores', 'report'] },",
-    "replace": "        { key: 'results', label: '成果与报告', tabs: ['findings', 'artifacts', 'chain', 'scores', 'report'] },",
+    "file": "client.js",
+    "find": "      { key: 'results', label: '成果与报告', tabs: ['findings', 'artifacts', 'evidence', 'chain', 'scores', 'report'] },",
+    "replace": "      { key: 'results', label: '成果与报告', tabs: ['findings', 'artifacts', 'chain', 'scores', 'report'] },",
     "test": "test-nav-groups.mjs",
     "groups": [
       15
@@ -210,9 +210,9 @@
   },
   {
     "id": "M20-escape-overlay-guard",
-    "file": "lib/redteam/client.js",
-    "find": "      if (nestedOverlay) return",
-    "replace": "      if (nestedOverlay && false) return",
+    "file": "client.js",
+    "find": "    if (nestedOverlay) return",
+    "replace": "    if (nestedOverlay && false) return",
     "test": "test-fullscreen.mjs",
     "groups": [
       16
@@ -232,9 +232,9 @@
   },
   {
     "id": "M31-attention-overview-degrade",
-    "file": "lib/redteam/client.js",
-    "find": "          api({ op: 'intelStatus' }).catch(function () { return null }),",
-    "replace": "          api({ op: 'intelStatus' }),",
+    "file": "client.js",
+    "find": "        api({ op: 'intelStatus' }).catch(function () { return null }),",
+    "replace": "        api({ op: 'intelStatus' }),",
     "test": "test-attention-badge.mjs",
     "groups": [
       18

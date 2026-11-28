@@ -18,7 +18,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 const PKG = fs.existsSync(path.join(ROOT, "dist", "build", "package"))
   ? path.join(ROOT, "dist", "build", "package")
   : ROOT;
-const SOURCE = path.join(PKG, "lib", "redteam", "client.js");
+const SOURCE = path.join(PKG, "client.js");
 
 const BEGIN = "/* [dsh-purge-plus] __RT_FULLSCREEN_BEGIN__ */";
 const END = "/* [dsh-purge-plus] __RT_FULLSCREEN_END__ */";

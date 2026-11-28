@@ -22,7 +22,7 @@ const PKG = fs.existsSync(path.join(ROOT, "dist", "build", "package"))
   ? path.join(ROOT, "dist", "build", "package")
   : ROOT;
 const PANEL = path.join(PKG, "client.js");
-const RT = path.join(PKG, "lib", "redteam", "client.js");
+const RT = path.join(PKG, "client.js");
 
 let pass = 0;
 const fails = [];
@@ -204,15 +204,18 @@ ok(!/op: "attentionAck"[^}]*\}\s*\)\s*\.then\(\(\)\s*=>\s*\{\}\)/.test(panel), "
       };
       const doc = { hidden: false, addEventListener: () => {}, removeEventListener: () => {} };
       const factory = new Function(
-        "import_react2", "h2", "api", "currentSessionId", "host2", "hostSetDraft", "setDock",
-        "window", "document", "navigator", "CustomEvent",
+        /* 两套方言都给：片段插在演练台 IIFE 里用 import_react2/h2/api，
+           插在面板顶层用 import_react/h/apiUrl。夹具给全，才测的是行为而不是位置。 */
+        "import_react", "import_react2", "h", "h2", "apiUrl", "api",
+        "currentSessionId", "host2", "hostSetDraft", "setDock",
+        "window", "document", "navigator", "CustomEvent", "fetch",
         block + "\nreturn AttentionBadge;",
       );
       const Badge = factory(
-        { default: R }, h2,
-        () => Promise.resolve(null),
+        { default: R }, { default: R }, h2, h2,
+        () => Promise.resolve(null), () => Promise.resolve(null),
         () => "sess-1", {}, () => false, () => {},
-        win, doc, { clipboard: { writeText: () => {} } }, function CustomEvent() {},
+        win, doc, { clipboard: { writeText: () => {} } }, function CustomEvent() {}, () => Promise.resolve({ json: () => Promise.resolve(null) }),
       );
       return Badge();
     };

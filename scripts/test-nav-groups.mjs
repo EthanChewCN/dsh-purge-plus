@@ -18,7 +18,7 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const PKG = fs.existsSync(path.join(ROOT, "dist", "build", "package"))
   ? path.join(ROOT, "dist", "build", "package")
   : ROOT;
-const FILES = ["lib/redteam/client.js", "client.js"];
+const FILES = ["client.js"];
 
 let pass = 0;
 let fail = 0;

@@ -26,15 +26,15 @@ const ok = (cond, label, extra) => {
 const section = (s) => console.log("\n" + s);
 
 /* ── 从构建产物里切出组件原文（不重写一份等价实现）────────────── */
-const src = fs.readFileSync(path.join(PKG, "lib", "redteam", "client.js"), "utf8");
+const src = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
 const cut = (from, to) => {
   const a = src.indexOf(from);
   const b = to === null ? src.length : src.indexOf(to, a);
   if (a < 0 || b < 0) throw new Error("切不出代码段：" + from);
   return src.slice(a, b);
 };
-const reportSrc = cut("    const R2_CONF = {", "    /* 外层开关");
-const rowSrc = cut("    const CONF_LABEL = {", "    function EvidenceTab(props) {");
+const reportSrc = cut("  const R2_CONF = {", "  /* 外层开关");
+const rowSrc = cut("  const CONF_LABEL = {", "  function EvidenceTab(props) {");
 
 /* 记录型 h：函数组件直接调用，最后把整棵树摊平成文本 */
 const flat = [];
@@ -73,9 +73,11 @@ const data = store.reportV2(eng.id);
 
 let ReportV2;
 try {
-  const factory = new Function("h", "React", "copyText", "URL", "Blob", "document",
+  /* 产物里 hooks 走 import_react2.default.useState（演练台 IIFE 方言），
+     测试的作用域必须同时提供 React 与 import_react2，否则求值即 ReferenceError。 */
+  const factory = new Function("h", "h2", "React", "import_react2", "copyText", "URL", "Blob", "document",
     reportSrc + "\n return { ReportV2, R2ProofCard, R2ReproCard, R2ReproList };");
-  ({ ReportV2 } = factory(h, React, () => {}, { createObjectURL: () => "", revokeObjectURL: () => {} }, function () {}, { createElement: () => ({ click: () => {} }) }));
+  ({ ReportV2 } = factory(h, h, React, { default: React }, () => {}, { createObjectURL: () => "", revokeObjectURL: () => {} }, function () {}, { createElement: () => ({ click: () => {} }) }));
   ok(true, "组件代码可求值（切自构建产物）");
 } catch (e) {
   ok(false, "组件代码无法求值：" + e.message);
@@ -117,8 +119,8 @@ ok(emptyText.includes("没有可归属的互联网资产"), "空数据给出可�
 /* ── 2. EvidenceRow 渲染 ────────────────────────────────────── */
 section("[2] EvidenceRow 渲染");
 const fmt = (t) => String(t === null || t === undefined ? "" : t).replace("T", " ").slice(0, 16);
-const factory2 = new Function("h", "React", "fmt", rowSrc + "\n return { EvidenceRow };");
-const { EvidenceRow } = factory2(h, React, fmt);
+const factory2 = new Function("h", "h2", "React", "import_react2", "fmt", rowSrc + "\n return { EvidenceRow };");
+const { EvidenceRow } = factory2(h, h, React, { default: React }, fmt);
 
 flat.length = 0;
 let threwRow = null;

@@ -5,8 +5,8 @@
 //   · vendor/ 永远不被写入（只在构建时读取），升级时整目录替换即可。
 //   · overlay 的改动面（计数方法学见 docs/02）：
 //       - 新增文件：overlay/files/** + overlay/snippets/**
-//       - 锚点编辑：overlay/edits.mjs **299 条**（required 296 / required:false 3）
-//       - snippet 注入点：§3c **92 处**（两份产物各一遍）
+//       - 锚点编辑：overlay/edits.mjs **316 条**（required 313 / required:false 3）
+//       - snippet 注入点：§3c **54 处**（只注入 client.js；lib/redteam/client.js 是上游源占位文件，不加载）
 //       - 品牌文案替换：§3b 4 条；页签修正：§3d
 //     这三个数字由 verify [26] 组现场复算守卫（连这条注释里的数字一起查：
 //     注释写 179 而实际 192 时，读注释的人会以为改动面比真实的小）。
@@ -92,6 +92,7 @@ log(`✓ overlay/files 覆盖完成`);
      [45] 有一组断言盯着这份依赖清单。 */
   const helpers = ["verify.mjs", "check-op-contract.mjs", "check-proof-classes.mjs",
     "check-mutation-coverage.mjs", "check-vendor-drift.mjs", "check-tracked.mjs",
+    "check-scope.mjs",
     "mutate-check.mjs", "mutations.json"];
   const shippedHelpers = [];
   for (const name of helpers) {
@@ -230,35 +231,43 @@ function readSnippet(name) {
 const SNIPPET_SRC = readSnippet("artifacts-tab.js");
 
 /** 把 snippet 适配到某一份产物的方言。 */
-function adaptSnippet(text, dialect) {
+/* 演练台 IIFE 的作用域边界。
+ *
+ * 同一个 client.js 里有两套方言，靠位置区分，不是靠片段自报：
+ *   演练台 IIFE 内 —— h2 / import_react2 / api（IIFE 自己声明的）
+ *   面板顶层     —— h  / import_react  / apiUrl（src/shared/react.js 第 47-48 行）
+ *
+ * 0.1.183 的白屏就是这套判断缺失的后果：panel 方言一律改写 h → h2，
+ * 而兜底组件与角标都插在 IIFE 外面，于是 render 一进去就 ReferenceError，
+ * 兜底自己把面板打死。
+ *
+ * 边界用「dock.js 之前那一行是 IIFE 收尾」定位：文件里成百上千对 CSS 花括号，
+ * 数括号必然被字符串里的 { } 带偏。
+ */
+function drillSpan(text) {
+  const end = text.indexOf("\n// src/state/dock.js");
+  if (end < 0) return null;
+  const start = text.lastIndexOf("var __dshPurgeDrill = (() => {", end);
+  return start < 0 ? null : [start, end];
+}
+
+function adaptSnippet(text, dialect, scope = "drill") {
   if (dialect === "redteam") return text;
-  // panel：h → h2，React.xxx → import_react2.default.xxx，整体缩进减 2 空格
-  const swapped = text
-    .replace(/\bReact\./g, "import_react2.default.")
-    .replace(/(^|[^\w$.])h\(/g, "$1h2(")
-    /* h('div', ...) 里的字符串子节点不受影响；这里只把模板里的 h( 换成 h2( */;
-  return swapped
-    .split("\n")
-    .map((line) => (line.startsWith("  ") ? line.slice(2) : line))
-    .join("\n");
+  const dedent = (s) =>
+    s.split("\n").map((line) => (line.startsWith("  ") ? line.slice(2) : line)).join("\n");
+  if (scope === "top") {
+    // 面板顶层：h( 原样保留，React.x → import_react.default.x
+    return dedent(text.replace(/\bReact\./g, "import_react.default."));
+  }
+  // 演练台 IIFE 内：h → h2，React.x → import_react2.default.x
+  return dedent(
+    text
+      .replace(/\bReact\./g, "import_react2.default.")
+      .replace(/(^|[^\w$.])h\(/g, "$1h2(")
+  );
 }
 
 const SNIPPETS = [
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "凭据与文件组件",
-    anchor: "    function FindingsTab(props) {", mode: "before",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "页签按钮",
-    anchor: "        ['chain', '攻击链'], ['scores', '得分目标'], ['report', '报告'],",
-    mode: "before", text: "        ['artifacts', '凭据与文件'],\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "body 分发",
-    anchor: "      else if (st.tab === 'scores') body = h(ScoreTab, { engagement: eng, refreshKey: refreshKey })\n",
-    mode: "before",
-    text: "      else if (st.tab === 'artifacts') body = h(ArtifactsTab, { engagement: eng, refreshKey: refreshKey })\n",
-  },
   {
     file: "client.js", dialect: "panel", what: "面板崩溃兜底",
     anchor: "function DetailSettings({ view } = {}) {", mode: "before",
@@ -277,33 +286,15 @@ const SNIPPETS = [
     anchor: '    else if (st.tab === "scores")\n', mode: "before",
     text: '    else if (st.tab === "artifacts")\n      body = h2(ArtifactsTab, { engagement: eng, refreshKey });\n',
   },
-
-  // ── P23：清理清单可编辑 + 删除靶标入口 ────────────────────────────
-  // 两个入口都放在「凭据与文件」页 / 顶部靶标选择器旁：
-  //   清理清单 —— 人也要能登记「这个马还没删」，不能只能跟智能体说话；
-  //   删除靶标 —— 之前**根本没有入口**，建错了只能手动 rm 目录。
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "清理清单组件",
-    anchor: "    function FindingsTab(props) {", mode: "before", src: "cleanup-panel.js",
-  },
   {
     file: "client.js", dialect: "panel", what: "清理清单组件（面板内嵌版）",
     anchor: "  function FindingsTab(props) {", mode: "before", src: "cleanup-panel.js",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "删除靶标按钮",
-    anchor: "          h('div', { className: 'rt-spacer' }),\n          embedded ? null : h(VersionBar, null),",
-    mode: "before", src: "engagement-delete-button.js",
   },
   {
     file: "client.js", dialect: "panel", what: "删除靶标按钮（面板内嵌版）",
     anchor: '        h2("div", { className: "rt-spacer" }),\n        embedded ? null : h2(VersionBar, null),',
     mode: "before", src: "engagement-delete-button.js",
   },
-
-  // ── P1：面板跟随「本会话绑定的靶标」 ──────────────────────────────
-  // 只改 client.js：宿主上下文（host2 / currentSessionId）只在这份产物里存在，
-  // lib/redteam/client.js 是它的可读源形，不含宿主接线。
   {
     file: "client.js", dialect: "panel", what: "会话跟随：状态与取 id 助手",
     anchor: "    const [seen, setSeen] = import_react2.default.useState(null);\n",
@@ -400,20 +391,9 @@ const SNIPPETS = [
       "          \"\\u8DDF\\u968F\\u672C\\u4F1A\\u8BDD\"\n" +
       "        ) : null,\n",
   },
-
-  // ── P2：会话 → 靶标关系图（SessionMap）────────────────────────────
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "session-map.js",
-    what: "会话关系图组件", anchor: "    function AgentsTab(props) {", mode: "before",
-  },
   {
     file: "client.js", dialect: "panel", src: "session-map.js",
     what: "会话关系图组件（面板内嵌版）", anchor: "  function AgentsTab(props) {", mode: "before",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "会话关系图挂进智能体页",
-    anchor: "          h(ConcurrencyCard, { concurrency, onSaved: load }),", mode: "before",
-    text: "          h(SessionMap, { refreshKey: refreshKey, sessionId: props.sessionId, onPick: props.onPick }),\n",
   },
   {
     file: "client.js", dialect: "panel", what: "会话关系图挂进智能体页（面板内嵌版）",
@@ -421,21 +401,9 @@ const SNIPPETS = [
     text: "        h2(SessionMap, { refreshKey, sessionId: props.sessionId, onPick: props.onPick }),\n",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "session-map.css",
-    what: "会话关系图样式", mode: "after",
-    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
-  {
     file: "client.js", dialect: "panel", src: "session-map.css",
     what: "会话关系图样式（面板内嵌版）", mode: "after",
     anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
-
-  // ── P20：报告文档视图（markdown 就地渲染）──────────────────────────
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "md-render.js",
-    what: "markdown 渲染器", mode: "before",
-    anchor: "    function FindingsTab(props) {",
   },
   {
     file: "client.js", dialect: "panel", src: "md-render.js",
@@ -443,47 +411,18 @@ const SNIPPETS = [
     anchor: "  function FindingsTab(props) {",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "md-render.css",
-    what: "markdown 渲染样式", mode: "after",
-    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
-  {
     file: "client.js", dialect: "panel", src: "md-render.css",
     what: "markdown 渲染样式（面板内嵌版）", mode: "after",
     anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
-
-  // ── P3：「现在在等谁」卡片 ───────────────────────────────────────
-  // 与 SessionMap 同页相邻：一个回答「谁在打哪个靶标」，一个回答「谁卡住了在等我」。
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "attention-card.js",
-    what: "等谁卡片组件", anchor: "    function AgentsTab(props) {", mode: "before",
   },
   {
     file: "client.js", dialect: "panel", src: "attention-card.js",
     what: "等谁卡片组件（面板内嵌版）", anchor: "  function AgentsTab(props) {", mode: "before",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "等谁卡片挂进智能体页",
-    anchor: "          h(ConcurrencyCard, { concurrency, onSaved: load }),", mode: "before",
-    text: "          h(AttentionCard, { engagement: eng, refreshKey: refreshKey, sessionId: props.sessionId }),\n",
-  },
-  {
     file: "client.js", dialect: "panel", what: "等谁卡片挂进智能体页（面板内嵌版）",
     anchor: "        h2(ConcurrencyCard, { concurrency, onSaved: load }),", mode: "before",
     text: "        h2(AttentionCard, { engagement: eng, refreshKey, sessionId: props.sessionId }),\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", what: "会话关系图：点节点切靶标",
-    anchor: "      else if (st.tab === 'agents' || st.tab === 'prompts') body = h(AgentsTab, { engagement: eng, refreshKey: refreshKey })",
-    mode: "replace",
-    text:
-      "      else if (st.tab === 'agents' || st.tab === 'prompts') body = h(AgentsTab, {\n" +
-      "        engagement: eng, refreshKey: refreshKey,\n" +
-      "        sessionId: (typeof rtSessionId === 'function' ? rtSessionId() : ''),\n" +
-      "        /* [dsh-purge-plus] 会话图上的靶标可点：点了就切过去（safe 的图只能看） */\n" +
-      "        onPick: (id) => { if (!id) return; setEng(id); loadSnapshot(id) },\n" +
-      "      })",
   },
   {
     file: "client.js", dialect: "panel", what: "会话关系图：点节点切靶标（面板内嵌版）",
@@ -502,53 +441,15 @@ const SNIPPETS = [
       "        }\n" +
       "      });",
   },
-
-  // ── P4：一级导航分组 + 二级页签 ──────────────────────────────────
-  // safe 的导航是左侧竖排（rt-nav-groups），依赖 rt-chrome/rt-nav/rt-cmd 三层
-  // 布局重写。本包是右侧浮动 dock，默认宽约 420px，竖排导航会吃掉一成多的内容
-  // 宽度，所以改成横向 chips：一级一行，组内多页时下面再出一行二级页签。
-  //
-  // 三处插入点各有讲究：
-  //   CSS    追加在 .rt-tabs 规则之后（同一段模板串里，不需要额外 import）
-  //   defs   插在 tabs 表之后、const full 之前 —— 要在渲染前就位，也要能用 unreadOf
-  //   row    替换页签栏的**开头**，末尾的 `})),` 原样保留：括号因此自动配平
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "nav-groups.css",
-    what: "导航分组样式", mode: "after",
-    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
-  // ── 皮肤层：safe 的 token 链（ui-theme → workspace-skin → unified-components）──
-  // 必须排在其它样式之后：它定义 --ui-* / --rt-* 并把组件样式收口，
-  // 顺序反了会被后面的局部规则盖掉。
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "rt-skin.css",
-    what: "皮肤层（token 链）", mode: "after",
-    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
   {
     file: "client.js", dialect: "panel", src: "rt-skin.css",
     what: "皮肤层（token 链，面板内嵌版）", mode: "after",
     anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
   },
-
   {
     file: "client.js", dialect: "panel", src: "nav-groups.css",
     what: "导航分组样式（面板内嵌版）", mode: "after",
     anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
-  // ── P6：态势首页 ────────────────────────────────────────────────
-  // 三处必须一起改，否则会出现「页签在但点开空白」或「分组里有但页签表里没有」：
-  //   ① tabs 表（渲染二级页签用）
-  //   ② body 分发（真正渲染哪个组件）
-  //   ③ 组件本体
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "页签表加工作总览",
-    anchor: "      const tabs = [\n        ['assets', '资产测绘'], ['env', '环境适配'], ['agents', '智能体'], ['sessions', '会话隧道'],\n",
-    text:
-      "      const tabs = [\n" +
-      "        ['overview', '工作总览'],\n" +
-      "        ['assets', '资产测绘'], ['env', '环境适配'], ['agents', '智能体'], ['sessions', '会话隧道'],\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -560,25 +461,9 @@ const SNIPPETS = [
       '      ["assets", "\\u8D44\\u4EA7\\u6D4B\\u7ED8"],\n',
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "overview-tab.js",
-    what: "态势首页组件", mode: "before",
-    anchor: "    function FindingsTab(props) {",
-  },
-  {
     file: "client.js", dialect: "panel", src: "overview-tab.js",
     what: "态势首页组件（面板内嵌版）", mode: "before",
     anchor: "  function FindingsTab(props) {",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "before",
-    what: "态势首页分发",
-    anchor: "      else if (!eng) {\n",
-    text:
-      "      /* 首页是全局页：没有靶标也能打开（组件自己会提示去建靶标）。\n" +
-      "         放在 !eng 分支之前，否则选中靶标之前点首页什么都不发生。 */\n" +
-      "      else if (st.tab === 'overview') body = h(OverviewTab, {\n" +
-      "        engagement: eng, refreshKey: refreshKey, onGo: (t) => goTab(t),\n" +
-      "      })\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "before",
@@ -593,76 +478,24 @@ const SNIPPETS = [
       "      });\n",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "nav-groups-defs.js",
-    what: "导航分组定义", mode: "before",
-    anchor: "      const full = isFullWindow()\n",
-  },
-  {
     file: "client.js", dialect: "panel", src: "nav-groups-defs.js",
     what: "导航分组定义（面板内嵌版）", mode: "before",
     anchor: "    const full = isFullWindow();\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "nav-groups-row.js",
-    what: "分组行 + 二级页签过滤", mode: "replace",
-    anchor: "        h('div', { className: 'rt-tabs', role: 'tablist' }, tabs.map((t) => {",
   },
   {
     file: "client.js", dialect: "panel", src: "nav-groups-row.js",
     what: "分组行 + 二级页签过滤（面板内嵌版）", mode: "replace",
     anchor: '      h2(\n        "div",\n        { className: "rt-tabs", role: "tablist" },\n        tabs.map((t) => {',
   },
-
-  // ── P5：站内全屏 ────────────────────────────────────────────────
-  // 顺序有讲究，别调换：
-  //   ① 钩子必须插在 Panel **之前**（同作用域，函数声明会提升，但读代码的人先看到定义）
-  //   ② `const full = isFullWindow()` 这一行此时还在，下面那条 replace 才匹配得到
-  //   ③ shellProps.ref 必须在 return 之前赋值
-  // ── 主题开关（皮肤层装好之后才有意义：data-theme 要有 --ui-* 的亮色变体可切）──
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "theme-toggle.js",
-    what: "主题开关", mode: "before",
-    anchor: "    function Panel(props) {",
-  },
   {
     file: "client.js", dialect: "panel", src: "theme-toggle.js",
     what: "主题开关（面板内嵌版）", mode: "before",
     anchor: "  function Panel(props) {",
   },
-
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "fullscreen-hook.js",
-    what: "站内全屏钩子", mode: "before",
-    anchor: "    function Panel(props) {",
-  },
   {
     file: "client.js", dialect: "panel", src: "fullscreen-hook.js",
     what: "站内全屏钩子（面板内嵌版）", mode: "before",
     anchor: "  function Panel(props) {",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "after",
-    what: "全屏请求事件常量",
-    anchor:
-      "    const isFullWindow = () => {\n" +
-      "      try { return String(window.location.hash || '') === '#redteam-full' } catch { return false }\n" +
-      "    }\n",
-    text:
-      "    /* [dsh-purge-plus] P5：站内全屏请求事件。\n" +
-      "       给「别的地方想让工作台铺满」留一个口子（侧栏图标、授权后跳转、引导），\n" +
-      "       不用去猜组件内部状态，也不用 props 层层往下传。 */\n" +
-      "    const FULL_REQUEST_EVENT = 'rt-open-full'\n" +
-      "    /* 请求原地铺满，返回**是否被接住**。事件设成 cancelable，\n" +
-      "       工作台挂载时会在监听器里 preventDefault 表示「我处理了」。\n" +
-      "       返回 false 说明工作台根本没挂载（比如面板收起了），\n" +
-      "       调用方可以据此退回开新窗口，而不是让按钮点了没反应。 */\n" +
-      "    const requestInPlaceFull = () => {\n" +
-      "      try {\n" +
-      "        const ev = new Event(FULL_REQUEST_EVENT, { cancelable: true })\n" +
-      "        window.dispatchEvent(ev)\n" +
-      "        return Boolean(ev.defaultPrevented)\n" +
-      "      } catch (e) { return false }\n" +
-      "    }\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "after",
@@ -690,31 +523,6 @@ const SNIPPETS = [
       '  };\n',
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "全屏状态与进出",
-    anchor: "      const full = isFullWindow()\n",
-    text:
-      "      /* [dsh-purge-plus] P5 站内全屏：不再 window.open 开新窗口。\n" +
-      "         桌面端开出来的是裸浏览器窗口，宿主的会话、主题变量、事件通道全丢，\n" +
-      "         用户点「全面浏览」等于把上下文扔到另一个窗口里。\n" +
-      "         shellRef 要挂在**所有形态**的外壳上：钩子在 full 还是 false 的时候\n" +
-      "         就要拿它调 requestFullscreen()，只在 full 分支挂 ref 永远拿不到元素。 */\n" +
-      "      const shellRef = React.useRef(null)\n" +
-      "      const fullscreen = useWorkbenchFullscreen(React, shellRef)\n" +
-      "      const full = fullscreen.expanded || isFullWindow()\n" +
-      "      /* 接住别处的「铺满」请求：preventDefault 就是在告诉调用方「我处理了」。\n" +
-      "         顺带把面板打开 —— 收起状态下铺满一个 display:none 的壳子等于没反应。 */\n" +
-      "      React.useEffect(() => {\n" +
-      "        const onFull = (event) => {\n" +
-      "          try { if (event && event.preventDefault) event.preventDefault() } catch (e) { /* ignore */ }\n" +
-      "          setUI({ open: true })\n" +
-      "          void fullscreen.enter()\n" +
-      "        }\n" +
-      "        window.addEventListener(FULL_REQUEST_EVENT, onFull)\n" +
-      "        return () => window.removeEventListener(FULL_REQUEST_EVENT, onFull)\n" +
-      "      }, [fullscreen.enter])\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "replace",
     what: "全屏状态与进出（面板内嵌版）",
     anchor: "    const full = isFullWindow();\n",
@@ -733,26 +541,6 @@ const SNIPPETS = [
       "      window.addEventListener(FULL_REQUEST_EVENT, onFull);\n" +
       "      return () => window.removeEventListener(FULL_REQUEST_EVENT, onFull);\n" +
       "    }, [fullscreen.enter]);\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "进入全屏",
-    anchor:
-      "        try { window.open(window.location.href.split('#')[0] + '#redteam-full', '_blank', 'noopener') } catch (e) { setErr('无法打开新窗口：' + ((e && e.message) || e)) }\n",
-    text:
-      "        void fullscreen.enter()\n" +
-      "        /* 嵌入形态没有 CSS 兜底（宿主 .dshpp-native 的 layout containment 会把\n" +
-      "           position:fixed 关进右侧栏），原生全屏是唯一手段。浏览器没批的话\n" +
-      "           （权限策略、手势丢失），退回开新窗口 —— 至少功能还在，\n" +
-      "           而不是点一下什么都不发生。 */\n" +
-      "        if (!embedded) return\n" +
-      "        setTimeout(() => {\n" +
-      "          try {\n" +
-      "            if (document.fullscreenElement) return\n" +
-      "            void fullscreen.exit()\n" +
-      "            window.open(window.location.href.split('#')[0] + '#redteam-full', '_blank', 'noopener')\n" +
-      "          } catch (e) { /* 弹窗被拦 */ }\n" +
-      "        }, 250)\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -781,27 +569,6 @@ const SNIPPETS = [
       "      }, 250);\n",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "退出全屏",
-    anchor:
-      "        /* 优先关掉脚本打开的窗口；关不掉就退回带侧栏的普通界面 */\n" +
-      "        try { window.close() } catch (e) { /* 非脚本打开的窗口无法关闭 */ }\n" +
-      "        try {\n" +
-      "          if (window.location.hash) {\n" +
-      "            window.location.hash = ''\n" +
-      "            window.location.reload()\n" +
-      "          }\n" +
-      "        } catch (e) { /* ignore */ }\n",
-    text:
-      "        /* [dsh-purge-plus] P5：退出走钩子，原生与 CSS 两层一起收。\n" +
-      "           原来那套是 window.close() + 改 hash + reload —— reload 会把当前页签、\n" +
-      "           滚动位置、没提交的表单全丢掉，退个全屏不该有这种代价。 */\n" +
-      "        void fullscreen.exit()\n" +
-      "        if (isFullWindow()) {\n" +
-      "          try { window.history.replaceState(null, '', window.location.pathname + window.location.search) } catch (e) { /* ignore */ }\n" +
-      "        }\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "replace",
     what: "退出全屏（面板内嵌版）",
     anchor:
@@ -822,27 +589,6 @@ const SNIPPETS = [
       "      if (isFullWindow()) {\n" +
       '        try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) { /* ignore */ }\n' +
       "      }\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "Escape 归钩子",
-    anchor:
-      "      React.useEffect(() => {\n" +
-      "        if (!full) return undefined\n" +
-      "        const onKey = (e) => { if (e.key === 'Escape') exitFull() }\n" +
-      "        window.addEventListener('keydown', onKey)\n" +
-      "        return () => window.removeEventListener('keydown', onKey)\n" +
-      "      }, [full])\n",
-    text:
-      "      /* Escape 交给钩子统一处理：它会跳过嵌套浮层，\n" +
-      "         免得按一次 Esc 把底下的工作台和上面的弹窗一起收掉。\n" +
-      "         这里只补钩子管不到的一种情形 —— 直接用 #redteam-full 打开、钩子没展开过。 */\n" +
-      "      React.useEffect(() => {\n" +
-      "        if (!isFullWindow() || embedded) return undefined\n" +
-      "        const onKey = (e) => { if (e.key === 'Escape') exitFull() }\n" +
-      "        window.addEventListener('keydown', onKey)\n" +
-      "        return () => window.removeEventListener('keydown', onKey)\n" +
-      "      }, [embedded])\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -868,18 +614,6 @@ const SNIPPETS = [
       "    }, [embedded]);\n",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "外壳形态：嵌入时不套 .rt-full",
-    anchor: "      const shellProps = full\n        ? { className: 'rt-full', style: { display: 'flex' } }\n",
-    text:
-      "      /* 嵌入形态不套 .rt-full：宿主 .dshpp-native 用了 container-type:inline-size，\n" +
-      "         它带的 layout containment 会给 position:fixed 建包含块，.rt-full 于是只铺满\n" +
-      "         右侧栏而不是窗口。嵌入形态改用原生全屏（浏览器把它提到 top layer，\n" +
-      "         不受包含块影响），CSS 兜底那层对它没有意义。 */\n" +
-      "      const shellProps = full && !embedded\n" +
-      "        ? { className: 'rt-full', style: { display: 'flex' } }\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "replace",
     what: "外壳形态：嵌入时不套 .rt-full（面板内嵌版）",
     anchor:
@@ -890,26 +624,10 @@ const SNIPPETS = [
       '    const shellProps = full && !embedded ? { className: "rt-full", style: { display: "flex" } } : embedded ? {\n',
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "before",
-    what: "外壳 ref",
-    anchor: "      return h('div', shellProps,\n",
-    text: "      shellProps.ref = shellRef\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "before",
     what: "外壳 ref（面板内嵌版）",
     anchor: '    return h2(\n      "div",\n      shellProps,\n',
     text: "    shellProps.ref = shellRef;\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "全屏样式：让开桌面标题栏 + 嵌入原生全屏兜底",
-    anchor: ".rt-full{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;\n",
-    text:
-      ".rt-full{position:fixed;top:var(--dsh-frame-chrome-top,var(--dsh-frame-top-clearance,var(--dsh-windows-titlebar-height,0px)));right:0;bottom:0;left:0;z-index:60;display:flex;flex-direction:column;\n" +
-      "/* 嵌入形态靠原生全屏：Chromium 的 UA 样式会被 .rt-embedded 的 position:relative 压住，\n" +
-      "   这里显式把它摆回视口。:-webkit-full-screen 是 Safari 的历史写法，不能省。 */\n" +
-      ".rt-dock.rt-embedded:fullscreen,.rt-dock.rt-embedded:-webkit-full-screen{position:fixed;inset:0;width:100%;height:100%;z-index:60;background:var(--dsw-alias-bg-base)}\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -918,14 +636,6 @@ const SNIPPETS = [
     text:
       ".rt-full{position:fixed;top:var(--dsh-frame-chrome-top,var(--dsh-frame-top-clearance,var(--dsh-windows-titlebar-height,0px)));right:0;bottom:0;left:0;z-index:60;display:flex;flex-direction:column;\n" +
       ".rt-dock.rt-embedded:fullscreen,.rt-dock.rt-embedded:-webkit-full-screen{position:fixed;inset:0;width:100%;height:100%;z-index:60;background:var(--dsw-alias-bg-base)}\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "退出全屏按钮文案",
-    anchor:
-      "          full ? h('button', { className: 'rt-btn', title: '回到带侧栏的普通界面（或按 Esc）', onClick: exitFull }, '退出全面浏览') : null,\n",
-    text:
-      "          full ? h('button', { className: 'rt-btn', title: embedded ? '退出全屏（或按 Esc）' : '回到带侧栏的普通界面（或按 Esc）', onClick: exitFull }, embedded ? '退出全屏' : '退出全面浏览') : null,\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -952,14 +662,6 @@ const SNIPPETS = [
       "        ) : null,\n",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "进入全屏按钮文案",
-    anchor:
-      "          (full || embedded) ? null : h('button', { className: 'rt-btn', title: '在新浏览器窗口打开完整控制台', onClick: openFull }, '全面浏览'),\n",
-    text:
-      "          full ? null : h('button', { className: 'rt-btn', title: embedded ? '用浏览器原生全屏铺满屏幕（Esc 退出）' : '铺满当前窗口，不新开窗口（Esc 退出）', onClick: openFull }, embedded ? '全屏' : '全面浏览'),\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "replace",
     what: "进入全屏按钮文案（面板内嵌版）",
     anchor:
@@ -984,14 +686,6 @@ const SNIPPETS = [
       "        ),\n",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "全屏标题角标",
-    anchor:
-      "            full ? h('span', { className: 'rt-tag', style: { marginLeft: 6 } }, '独立窗口') : null),\n",
-    text:
-      "            full ? h('span', { className: 'rt-tag', style: { marginLeft: 6 } }, '全屏') : null),\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "replace",
     what: "全屏标题角标（面板内嵌版）",
     anchor:
@@ -1006,22 +700,6 @@ const SNIPPETS = [
       '            { className: "rt-tag", style: { marginLeft: 6 } },\n' +
       '            "\\u5168\\u5C4F"\n' +
       "          ) : null\n",
-  },
-
-  // ── P5 收口：所有「开新窗口看完整控制台」的入口改走原地铺满 ──────────
-  // 只装钩子不改入口 = 功能还在原地，但没人调用它。这三个入口是用户真正会点的：
-  //   ① 侧栏图标 FullButton
-  //   ② 授权通过后跳「全面浏览」
-  //   ③ 授权弹窗里点「同意并全面浏览」
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "侧栏全面浏览按钮",
-    anchor:
-      "        try { window.open(window.location.href.split('#')[0] + '#redteam-full', '_blank', 'noopener') } catch { /* 被浏览器拦截 */ }\n",
-    text:
-      "        /* [dsh-purge-plus] P5：先请求原地铺满；工作台没挂载才退回开新窗口。 */\n" +
-      "        if (requestInPlaceFull()) return\n" +
-      "        try { window.open(window.location.href.split('#')[0] + '#redteam-full', '_blank', 'noopener') } catch { /* 被浏览器拦截 */ }\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -1109,22 +787,9 @@ const SNIPPETS = [
       "                }\n" +
       "              }\n",
   },
-  // ── P8 / P12：四段式报告 + 证据账本 ─────────────────────────────
-  // 三个页签级别的改动都要**两份产物**一起做，否则「面板里点开」与
-  // 「全面浏览新窗口」会看到不一样的页签集合。
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "report-v2.css",
-    what: "四段式报告样式", mode: "after",
-    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
   {
     file: "client.js", dialect: "panel", src: "report-v2.css",
     what: "四段式报告样式（面板内嵌版）", mode: "after",
-    anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "evidence-ledger.css",
-    what: "证据账本样式", mode: "after",
     anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
   },
   {
@@ -1133,30 +798,14 @@ const SNIPPETS = [
     anchor: ".rt-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "report-v2.js",
-    what: "四段式报告组件", mode: "before",
-    anchor: "    function FindingsTab(props) {",
-  },
-  {
     file: "client.js", dialect: "panel", src: "report-v2.js",
     what: "四段式报告组件（面板内嵌版）", mode: "before",
     anchor: "  function FindingsTab(props) {",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "evidence-ledger-tab.js",
-    what: "证据账本组件", mode: "before",
-    anchor: "    function FindingsTab(props) {",
-  },
-  {
     file: "client.js", dialect: "panel", src: "evidence-ledger-tab.js",
     what: "证据账本组件（面板内嵌版）", mode: "before",
     anchor: "  function FindingsTab(props) {",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "报告页切四段式外层",
-    anchor: "body = h(ReportTab, { engagement: eng, refreshKey: refreshKey })",
-    text: "body = h(ReportTabPlus, { engagement: eng, refreshKey: refreshKey })",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -1165,22 +814,10 @@ const SNIPPETS = [
     text: "body = h2(ReportTabPlus, { engagement: eng, refreshKey });",
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "after",
-    what: "页签表加证据账本",
-    anchor: "        ['artifacts', '凭据与文件'],\n",
-    text: "        ['evidence', '证据账本'],\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "after",
     what: "页签表加证据账本（面板内嵌版）",
     anchor: '      ["artifacts", "凭据与文件"],\n',
     text: '      ["evidence", "\\u8BC1\\u636E\\u8D26\\u672C"],\n',
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "after",
-    what: "证据账本分发",
-    anchor: "      else if (st.tab === 'artifacts') body = h(ArtifactsTab, { engagement: eng, refreshKey: refreshKey })\n",
-    text: "      else if (st.tab === 'evidence') body = h(EvidenceTab, { engagement: eng, refreshKey: refreshKey })\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "after",
@@ -1188,11 +825,6 @@ const SNIPPETS = [
     anchor: '    else if (st.tab === "artifacts")\n      body = h2(ArtifactsTab, { engagement: eng, refreshKey });\n',
     text: '    else if (st.tab === "evidence")\n      body = h2(EvidenceTab, { engagement: eng, refreshKey });\n',
   },
-
-  // ── P26：待办角标（右下角常驻胶囊）────────────────────────────────
-  // 只进面板产物：独立窗口那份整个窗口就是演练台，没有 shell.overlay 可挂，
-  // 也没有「我在别的页面看不见」的问题。
-  // 挂载点选 shell.overlay 而不是某个页签内部：角标的价值全在「不在这页也看得见」。
   {
     file: "client.js", dialect: "panel", src: "attention-badge.js",
     what: "待办角标组件", mode: "before",
@@ -1204,26 +836,10 @@ const SNIPPETS = [
     anchor: "    h(EnvAdaptSendGate),\n",
     text: "    h(AttentionBadge, null),\n",
   },
-
-  // ── P27：团队任务板（官方 Agent Teams 的只读视图）──────────────────
-  // 组件插在 FindingsTab 之前（与其它页同一个作用域）。
-  // 顺序有讲究：先插组件，再改页签表，最后插分发 —— 分发锚点引用的是前面已插入的行。
-  // 两份产物都要改，否则「面板里点开」与「全面浏览新窗口」页签不一致。
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", src: "team-board-tab.js",
-    what: "团队任务板组件", mode: "before",
-    anchor: "    function FindingsTab(props) {",
-  },
   {
     file: "client.js", dialect: "panel", src: "team-board-tab.js",
     what: "团队任务板组件（面板内嵌版）", mode: "before",
     anchor: "  function FindingsTab(props) {",
-  },
-  {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "replace",
-    what: "页签表加任务板",
-    anchor: "        ['skills', '技能库'],\n",
-    text: "        ['skills', '技能库'],\n        ['team', '任务板'],\n",
   },
   {
     file: "client.js", dialect: "panel", mode: "replace",
@@ -1232,30 +848,48 @@ const SNIPPETS = [
     text: '      ["skills", "\\u6280\\u80FD\\u5E93"],\n      ["team", "\\u4EFB\\u52A1\\u677F"]\n',
   },
   {
-    file: "lib/redteam/client.js", dialect: "redteam", mode: "after",
-    what: "任务板分发",
-    anchor: "      else if (st.tab === 'evidence') body = h(EvidenceTab, { engagement: eng, refreshKey: refreshKey })\n",
-    text: "      else if (st.tab === 'team') body = h(TeamBoardTab, { refreshKey: refreshKey })\n",
-  },
-  {
     file: "client.js", dialect: "panel", mode: "after",
     what: "任务板分发（面板内嵌版）",
     anchor: '    else if (st.tab === "evidence")\n      body = h2(EvidenceTab, { engagement: eng, refreshKey });\n',
     text: '    else if (st.tab === "team")\n      body = h2(TeamBoardTab, { refreshKey, session: rtSessionId() });\n',
   },
+  {
+    file: "client.js", dialect: "panel", mode: "before",
+    what: "顶层全屏请求器",
+    anchor: "function requestDrill(kind) {",
+    text:
+      "/* [dsh-purge-plus] 顶层也要有一个「请求铺满」入口。\n" +
+      "   演练台 IIFE 里那个是私有的，面板顶层的「全面浏览」按钮够不着它 ——\n" +
+      "   少了这个，点下去就是 ReferenceError，不是「没反应」。\n" +
+      "   两个同名常量分处不同作用域，IIFE 内的会遮蔽这个，互不影响。 */\n" +
+      "const requestInPlaceFull = () => {\n" +
+      "  try {\n" +
+      "    const ev = new Event(\"rt-open-full\", { cancelable: true });\n" +
+      "    window.dispatchEvent(ev);\n" +
+      "    return Boolean(ev.defaultPrevented);\n" +
+      "  } catch (e) {\n" +
+      "    return false;\n" +
+      "  }\n" +
+      "};\n",
+  },
 ];
+const scopeCount = {};
 for (const sn of SNIPPETS) {
   const fp = path.join(PKG, sn.file);
   const src = fs.readFileSync(fp, "utf8");
   const hits = src.split(sn.anchor).length - 1;
   if (hits !== 1) die(`演练台移植：${sn.what} 锚点命中 ${hits} 次（要求 1 次）`);
-  const body = sn.text !== undefined ? sn.text : adaptSnippet(readSnippet(sn.src || "artifacts-tab.js"), sn.dialect);
+  const span = drillSpan(src);
+  const at = src.indexOf(sn.anchor);
+  const scope = span && at > span[0] && at < span[1] ? "drill" : "top";
+  if (sn.src && sn.dialect === "panel") scopeCount[scope] = (scopeCount[scope] || 0) + 1;
+  const body = sn.text !== undefined ? sn.text : adaptSnippet(readSnippet(sn.src || "artifacts-tab.js"), sn.dialect, scope);
   const next = sn.mode === "before" ? src.replace(sn.anchor, () => body + sn.anchor)
     : sn.mode === "replace" ? src.replace(sn.anchor, () => body)
     : src.replace(sn.anchor, () => sn.anchor + body);
   fs.writeFileSync(fp, next);
 }
-log(`✓ 演练台「凭据与文件」页已并入（${SNIPPETS.length} 处，两份产物）`);
+log(`✓ 演练台「凭据与文件」页已并入（${SNIPPETS.length} 处，只注入 client.js；方言 IIFE 内 ${scopeCount.drill || 0} / 顶层 ${scopeCount.top || 0}）`);
 
 // ── 3d. 授权弹窗「不同意」把面板留在非法页签 ────────────────────────
 // dockBus 的初始值是 tab:"clean"，而 "clean" 既不在页签表也没有 body 分支，

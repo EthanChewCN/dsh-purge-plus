@@ -57,10 +57,9 @@ function extractConst(src, name) {
 
 /* ── 一、面板产物：markdown 渲染器 + 会话图布局 ────────────────────── */
 const panel = fs.readFileSync(path.join(PKG, "client.js"), "utf8");
-const redteam = fs.readFileSync(path.join(PKG, "lib", "redteam", "client.js"), "utf8");
 
-for (const [label, src] of [["client.js", panel], ["lib/redteam/client.js", redteam]]) {
-  const hName = label === "client.js" ? "h2" : "h";
+for (const [label, src] of [["client.js", panel]]) {
+  const hName = "h2";
   const preamble = [
     "const h = (tag, props, ...kids) => ({ tag, props: props || {}, kids: kids.flat() });",
     /* 面板产物里 hyperscript 叫 h2，这里两个名字都提供 —— 切出来的原文里用的是产物自己的名字 */
