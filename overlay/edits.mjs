@@ -4777,6 +4777,15 @@ export function buildEdits(repo = resolveRepo()) {
         "          return\n" +
         "        }\n",
     },
+    // 面板崩溃兜底：DetailSettings 是面板唯一挂载点，抛错就整页空白。
+    // 包一层边界后，渲染期异常会画在页面上并留痕，不再需要靠重装绕过。
+    {
+      file: "client.js",
+      required: true,
+      find: '  return h("div", { className: "dshpp-detail-settings" }, h(PurgePage));\n',
+      replace:
+        '  return h("div", { className: "dshpp-detail-settings" }, h(PurgeErrorBoundary, null, h(PurgePage)));\n',
+    },
   ];
 }
 

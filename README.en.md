@@ -280,7 +280,7 @@ All 54 groups live in `scripts/verify.mjs`; the table below is an **excerpt** (t
 | 26 | Doc numbers vs recomputed code counts (298 / 96 / 74 / 14 / 8) | the docs started lying |
 | 28 | Op contract (upstream union 84 vs product 112) | an upstream capability is missing, or the UI names a wrong op |
 | 32 | Docs vs product (tab count / group count / own-patch list / dead file references) | the README describes something the product does not have |
-| 33 | Regression roll-up (all 42 `test-*.mjs` run together) | behaviour is broken while verification stays green |
+| 33 | Regression roll-up (all 43 `test-*.mjs` run together) | behaviour is broken while verification stays green |
 | 34 | `engines.node` aligned with the `node:sqlite` import in the code | the declared Node version crashes on install |
 
 **Why [33] exists**: the first 32 groups only inspect structure; none of them runs the `test-*.mjs` behavioural scripts. So "verify is green" and "nothing is broken" were two different claims — break `dispatch` and everything stays green as long as you avoid the verification assertions. The full run takes a few seconds, so there is no reason to skip it.
@@ -306,7 +306,7 @@ overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         54 read-only checks
 scripts/check-rebuild.mjs  clone-rebuild consistency (before release)
-scripts/test-*.mjs         42 behavioural regressions (run by verify [33])
+scripts/test-*.mjs         43 behavioural regressions (run by verify [33])
 scripts/build-cve-db.mjs   NVD + KEV + EPSS → local CVE base DB
 scripts/sync-upstream.sh   upgrade: swap vendor → replay → rebuild → verify
 ```

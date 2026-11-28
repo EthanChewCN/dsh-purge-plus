@@ -260,6 +260,11 @@ const SNIPPETS = [
     text: "      else if (st.tab === 'artifacts') body = h(ArtifactsTab, { engagement: eng, refreshKey: refreshKey })\n",
   },
   {
+    file: "client.js", dialect: "panel", what: "面板崩溃兜底",
+    anchor: "function DetailSettings({ view } = {}) {", mode: "before",
+    src: "panel-error-guard.js",
+  },
+  {
     file: "client.js", dialect: "panel", what: "凭据与文件组件（面板内嵌版）",
     anchor: "  function FindingsTab(props) {", mode: "before",
   },
