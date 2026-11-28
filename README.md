@@ -61,8 +61,8 @@ DeepSeek Harness 不只是把提示词转发给模型。它会在运行期重写
 
 - `vendor/community/` —— 基座，原样副本，构建时只读；
 - `vendor/safe/` —— 移植来源，原样副本，只用于比对；
-- `overlay/` —— 本仓库**全部**改动：新增文件 + **298 条锚点编辑**（`required` 295 / `required:false` 3）
-  + **96 处 snippet 注入点** + 4 条品牌文案替换。改动面由 `verify [26]` 组现场复算守卫，
+- `overlay/` —— 本仓库**全部**改动：新增文件 + **299 条锚点编辑**（`required` 295 / `required:false` 3）
+  + **97 处 snippet 注入点** + 4 条品牌文案替换。改动面由 `verify [26]` 组现场复算守卫，
   文档数字与代码不符即验收失败。
 
 ---
@@ -256,7 +256,7 @@ git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
 | 阶段 | 动作 | 失败会怎样 |
 | :--- | :--- | :--- |
 | 换 vendor | 整目录替换 `vendor/community` | — |
-| 重放 overlay | 298 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
+| 重放 overlay | 299 条锚点编辑逐条插入 | 命中数不符 → **构建中止**，打印文件与锚点 |
 | 重建 | vendor + overlay → `dist/package` → tgz | 断言不符 → 中止 |
 | 验收 | 54 组只读检查 | 任一组红 → 非零退出 |
 
@@ -308,7 +308,7 @@ overlay/files/             新增文件（覆盖进产物）
   ├─ skills/redteam/           技能库（40 个 .md）
   └─ NOTICE-PLUS.md            署名与逐文件改动记录
 overlay/snippets/          注入产物的长段代码（页签、图表、报告渲染…）
-overlay/edits.mjs          298 条锚点编辑清单
+overlay/edits.mjs          299 条锚点编辑清单
 overlay/repo.json          仓库坐标 + 本仓库修订号
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         54 组只读验收

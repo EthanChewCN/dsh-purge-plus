@@ -61,8 +61,8 @@ This repo is **not** a fork of community and **not** a fork of safe. It treats b
 
 - `vendor/community/` — the base, verbatim copy, read-only at build time;
 - `vendor/safe/` — the porting source, verbatim copy, used only for comparison;
-- `overlay/` — **every** change this repo makes: new files plus **298 anchor edits** (`required` 295 / `required:false` 3)
-  and **96 snippet injection points** plus 4 brand-string fixes, guarded by `verify [26]` (doc numbers must match recomputed code counts).
+- `overlay/` — **every** change this repo makes: new files plus **299 anchor edits** (`required` 295 / `required:false` 3)
+  and **97 snippet injection points** plus 4 brand-string fixes, guarded by `verify [26]` (doc numbers must match recomputed code counts).
 
 ---
 
@@ -249,7 +249,7 @@ git tag -a "v<ver>" -m "dsh-purge-plus <ver>" && git push origin master "v<ver>"
 | Stage | Action | On failure |
 | :--- | :--- | :--- |
 | Swap vendor | replace `vendor/community` wholesale | — |
-| Replay overlay | apply 298 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
+| Replay overlay | apply 299 anchor edits one by one | hit count mismatch → **build aborts**, prints file and anchor |
 | Rebuild | vendor + overlay → `dist/package` → tgz | assertion mismatch → abort |
 | Verify | 54 read-only checks | any red → non-zero exit |
 
@@ -301,7 +301,7 @@ overlay/files/             new files (copied over the product)
   ├─ skills/redteam/           skill library (40 .md files)
   └─ NOTICE-PLUS.md            attribution and per-file change record
 overlay/snippets/          long code blocks injected into the product (tabs, charts, report rendering …)
-overlay/edits.mjs          298 anchor edits
+overlay/edits.mjs          299 anchor edits
 overlay/repo.json          repo coordinates + this repo's revision
 scripts/build.mjs          vendor + overlay → dist → tgz
 scripts/verify.mjs         54 read-only checks

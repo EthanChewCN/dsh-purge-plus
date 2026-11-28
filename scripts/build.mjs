@@ -5,7 +5,7 @@
 //   · vendor/ 永远不被写入（只在构建时读取），升级时整目录替换即可。
 //   · overlay 的改动面（计数方法学见 docs/02）：
 //       - 新增文件：overlay/files/** + overlay/snippets/**
-//       - 锚点编辑：overlay/edits.mjs **298 条**（required 295 / required:false 3）
+//       - 锚点编辑：overlay/edits.mjs **299 条**（required 296 / required:false 3）
 //       - snippet 注入点：§3c **92 处**（两份产物各一遍）
 //       - 品牌文案替换：§3b 4 条；页签修正：§3d
 //     这三个数字由 verify [26] 组现场复算守卫（连这条注释里的数字一起查：
